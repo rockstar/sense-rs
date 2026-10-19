@@ -1,6 +1,6 @@
 use std::fmt::Write;
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
@@ -163,11 +163,9 @@ impl Client {
 
     /// Finish an MFA login with the token from [`Error::MfaRequired`] and a TOTP code.
     pub async fn login_mfa(&self, mfa_token: &str, totp: &str) -> Result<AuthResponse> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let now = iso8601(now);
+        let now = jiff::Timestamp::now()
+            .strftime("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
         let form = [
             ("mfa_token", mfa_token),
             ("totp", totp),
@@ -475,51 +473,9 @@ fn api_error(status: StatusCode, body: &[u8]) -> Error {
     }
 }
 
-/// A unix timestamp as UTC `YYYY-MM-DDTHH:MM:SSZ`.
-fn iso8601(secs: i64) -> String {
-    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    // Civil-from-days, from Howard Hinnant's date algorithms.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn iso8601_known_dates() {
-        // Expected values from Python's `datetime`.
-        let cases = [
-            (0, "1970-01-01T00:00:00Z"),
-            (946_684_799, "1999-12-31T23:59:59Z"),
-            (951_782_400, "2000-02-29T00:00:00Z"), // divisible by 400: leap year
-            (951_868_800, "2000-03-01T00:00:00Z"),
-            (-2_203_977_600, "1900-02-28T00:00:00Z"), // century: not a leap year
-            (-2_203_891_200, "1900-03-01T00:00:00Z"),
-            (1_709_164_800, "2024-02-29T00:00:00Z"),
-            (1_234_567_890, "2009-02-13T23:31:30Z"),
-            (1_700_000_000, "2023-11-14T22:13:20Z"),
-            (4_107_542_399, "2100-02-28T23:59:59Z"),
-            (4_107_542_400, "2100-03-01T00:00:00Z"),
-        ];
-        for (secs, expected) in cases {
-            assert_eq!(iso8601(secs), expected, "{secs}");
-        }
-    }
 
     #[test]
     fn mfa_error_is_detected() {
@@ -847,13 +803,17 @@ mod tests {
         assert!(seen[0].line.starts_with("POST /authenticate "));
         assert_eq!(seen[0].body, "email=me%40x.com&password=pw");
         assert!(seen[1].line.starts_with("POST /authenticate/mfa "));
-        assert!(
-            seen[1]
-                .body
-                .starts_with("mfa_token=mfa-1&totp=123456&client_time="),
-            "{}",
-            seen[1].body
-        );
+        let client_time = seen[1]
+            .body
+            .strip_prefix("mfa_token=mfa-1&totp=123456&client_time=")
+            .unwrap_or_else(|| panic!("{}", seen[1].body))
+            .replace("%3A", ":");
+        // Whole seconds in UTC, e.g. 2009-02-13T23:31:30Z.
+        assert_eq!(client_time.len(), 20, "{client_time}");
+        assert!(client_time.ends_with('Z'), "{client_time}");
+        let sent: jiff::Timestamp = client_time.parse().unwrap();
+        let age = jiff::Timestamp::now().as_second() - sent.as_second();
+        assert!((0..60).contains(&age), "{client_time}");
         let session = client.session().unwrap();
         assert_eq!(session.access_token, "a");
         assert_eq!(session.user_id, 9);
