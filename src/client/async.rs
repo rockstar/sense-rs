@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::{Method, StatusCode};
@@ -72,7 +72,10 @@ impl ClientBuilder {
 
     pub fn build(self) -> Result<Client> {
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("X-Sense-Protocol", PROTOCOL_VERSION.parse().unwrap());
+        headers.insert(
+            "X-Sense-Protocol",
+            reqwest::header::HeaderValue::from_static(PROTOCOL_VERSION),
+        );
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .default_headers(headers)
@@ -106,6 +109,10 @@ impl Default for Client {
 
 impl Client {
     /// A client with default settings and no session.
+    #[expect(
+        clippy::expect_used,
+        reason = "only fails if the TLS backend can't initialize"
+    )]
     pub fn new() -> Self {
         ClientBuilder::default()
             .build()
@@ -121,11 +128,19 @@ impl Client {
     /// The current session, if logged in. Persist it and pass it to
     /// [`set_session`](Self::set_session) later to skip logging in.
     pub fn session(&self) -> Option<Session> {
-        self.inner.session.read().unwrap().clone()
+        self.inner
+            .session
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub fn set_session(&self, session: Option<Session>) {
-        *self.inner.session.write().unwrap() = session;
+        *self
+            .inner
+            .session
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = session;
     }
 
     /// The first monitor on the account, which is the only one for most users.
@@ -150,7 +165,7 @@ impl Client {
     pub async fn login_mfa(&self, mfa_token: &str, totp: &str) -> Result<AuthResponse> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as i64;
         let now = iso8601(now);
         let form = [
@@ -204,7 +219,7 @@ impl Client {
             .inner
             .session
             .write()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .as_mut()
             .filter(|s| s.refresh_token == session.refresh_token)
         {
@@ -351,7 +366,7 @@ impl Client {
         self.inner
             .session
             .read()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .map(|s| s.access_token.clone())
             .ok_or(Error::NotAuthenticated)
@@ -442,7 +457,8 @@ fn path_segment(s: &str) -> Result<String> {
         if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
             out.push(char::from(b));
         } else {
-            write!(out, "%{b:02X}").unwrap();
+            // Writing to a String cannot fail.
+            let _ = write!(out, "%{b:02X}");
         }
     }
     Ok(out)

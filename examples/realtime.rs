@@ -1,6 +1,7 @@
 //! Print live power readings.
 //!
 //! SENSE_EMAIL=... SENSE_PASSWORD=... [SENSE_TOTP=...] cargo run --example realtime
+#![allow(clippy::expect_used)] // examples may panic on missing env vars
 
 use futures_util::StreamExt;
 use sense::realtime::RealtimeMessage;

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::time::{Instant, Sleep};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -60,8 +61,11 @@ impl RealtimeFeed {
                 Error::InvalidArgument("access token is not a valid header value".into())
             })?,
         );
-        headers.insert("Accept", "application/x-msgpack".parse().unwrap());
-        headers.insert("X-Sense-Protocol", PROTOCOL_VERSION.parse().unwrap());
+        headers.insert("Accept", HeaderValue::from_static("application/x-msgpack"));
+        headers.insert(
+            "X-Sense-Protocol",
+            HeaderValue::from_static(PROTOCOL_VERSION),
+        );
 
         let connect = tokio_tungstenite::connect_async(req);
         let ws = match tokio::time::timeout(CONNECT_TIMEOUT, connect)
@@ -117,7 +121,7 @@ impl RealtimeFeed {
     async fn send_command(&mut self, command: &str) -> Result<()> {
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         let frame = encode_command(command, epoch);
         self.ws.send(Message::Binary(frame.into())).await?;
@@ -317,7 +321,7 @@ fn encode_command(command: &str, epoch: u64) -> Vec<u8> {
         rmpv::Value::Map(Vec::new()),
     ] {
         // Writing to a Vec cannot fail.
-        rmpv::encode::write_value(&mut buf, &v).unwrap();
+        let _ = rmpv::encode::write_value(&mut buf, &v);
     }
     buf
 }

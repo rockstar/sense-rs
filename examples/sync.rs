@@ -1,6 +1,7 @@
 //! Blocking API: print today's usage and the device list.
 //!
 //! SENSE_EMAIL=... SENSE_PASSWORD=... [SENSE_TOTP=...] cargo run --example sync
+#![allow(clippy::expect_used)] // examples may panic on missing env vars
 
 use sense::Error;
 use sense::models::Scale;
