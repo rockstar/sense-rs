@@ -20,6 +20,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --all-targets
-      - run: cargo test --doc
+      - run: cargo test --all-targets --all-features
+      - run: cargo test --doc --all-features
       - uses: obi1kenobi/cargo-semver-checks-action@v2

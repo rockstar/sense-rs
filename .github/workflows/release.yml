@@ -27,7 +27,8 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
             exit 1
           fi
-      - run: cargo test --all-targets
+      - run: cargo test --all-targets --all-features
+      - run: cargo test --doc --all-features
       - uses: obi1kenobi/cargo-semver-checks-action@v2
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth

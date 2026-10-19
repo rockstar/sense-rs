@@ -18,14 +18,14 @@ repos:
 
       - id: cargo-test
         name: cargo test
-        entry: cargo test --all-targets
+        entry: cargo test --all-targets --all-features
         language: system
         types_or: [rust, toml]
         pass_filenames: false
 
       - id: cargo-test-doc
-        name: cargo test --doc
-        entry: cargo test --doc
+        name: cargo test --doc --all-features
+        entry: cargo test --doc --all-features
         language: system
         types_or: [rust, toml]
         pass_filenames: false
