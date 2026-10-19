@@ -199,7 +199,15 @@ impl Client {
         }
         let tokens: TokenResponse =
             serde_json::from_slice(&body).map_err(|e| Error::Decode(format!("renew: {e}")))?;
-        if let Some(s) = self.inner.session.write().unwrap().as_mut() {
+        // A login may have replaced the session while we waited; don't graft our tokens onto it.
+        if let Some(s) = self
+            .inner
+            .session
+            .write()
+            .unwrap()
+            .as_mut()
+            .filter(|s| s.refresh_token == session.refresh_token)
+        {
             s.access_token = tokens.access_token;
             s.refresh_token = tokens.refresh_token;
         }
