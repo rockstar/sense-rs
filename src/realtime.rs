@@ -4,12 +4,15 @@
 //! type string, a unix timestamp, and a payload map. Commands go the other
 //! way in the same shape.
 
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures_util::{SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
+use tokio::time::{Instant, Sleep};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -18,12 +21,26 @@ use crate::client::PROTOCOL_VERSION;
 use crate::error::{Error, Result};
 use crate::models::ConnectionState;
 
+/// How long the feed may be silent before it's treated as dead.
+const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// A live connection to a monitor's realtime feed.
 ///
 /// Implements [`Stream`]; use [`StreamExt::next`] to read events. The server
 /// sends [`RealtimeMessage::Update`] about once a second.
+///
+/// If nothing arrives for half the idle timeout, the feed sends a websocket
+/// ping. If nothing arrives for the whole timeout (30 s by default), the
+/// connection is presumed dead: the stream yields [`Error::Timeout`] and
+/// then ends. Reconnect with [`Client::realtime`](crate::Client::realtime).
 pub struct RealtimeFeed {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    idle_timeout: Duration,
+    last_seen: Instant,
+    /// Fires at the ping time, then (after a ping) at the idle deadline.
+    timer: Pin<Box<Sleep>>,
+    pinged: bool,
+    done: bool,
 }
 
 impl RealtimeFeed {
@@ -50,9 +67,31 @@ impl RealtimeFeed {
             }
             Err(e) => return Err(e.into()),
         };
-        let mut feed = RealtimeFeed { ws };
+        let now = Instant::now();
+        let mut feed = RealtimeFeed {
+            ws,
+            idle_timeout: DEFAULT_IDLE_TIMEOUT,
+            last_seen: now,
+            timer: Box::pin(tokio::time::sleep_until(now + DEFAULT_IDLE_TIMEOUT / 2)),
+            pinged: false,
+            done: false,
+        };
         feed.start_updates().await?;
         Ok(feed)
+    }
+
+    /// Change how long the feed may be silent before it's treated as dead.
+    /// A ping is sent after half of it.
+    pub fn set_idle_timeout(&mut self, timeout: Duration) {
+        self.idle_timeout = timeout;
+        self.mark_alive();
+    }
+
+    fn mark_alive(&mut self) {
+        self.last_seen = Instant::now();
+        self.pinged = false;
+        let ping_at = self.last_seen + self.idle_timeout / 2;
+        self.timer.as_mut().reset(ping_at);
     }
 
     /// Ask the server to (re)start sending realtime updates.
@@ -84,20 +123,55 @@ impl Stream for RealtimeFeed {
     type Item = Result<RealtimeEvent>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.done {
+            return Poll::Ready(None);
+        }
         loop {
             let msg = match self.ws.poll_next_unpin(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => break,
+                Poll::Ready(None) => {
+                    self.done = true;
+                    return Poll::Ready(None);
+                }
                 Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e.into()))),
                 Poll::Ready(Some(Ok(msg))) => msg,
             };
+            // Any frame, including a pong, proves the connection is alive.
+            self.mark_alive();
             match msg {
                 Message::Binary(bytes) => return Poll::Ready(Some(decode_frame(&bytes))),
-                Message::Close(_) => return Poll::Ready(None),
+                Message::Close(_) => {
+                    self.done = true;
+                    return Poll::Ready(None);
+                }
                 // Pings are answered by tungstenite; nothing else is expected.
                 _ => continue,
             }
         }
+
+        // Nothing to read. Ping once when quiet, give up when silent too long.
+        while self.timer.as_mut().poll(cx).is_ready() {
+            if self.pinged {
+                self.done = true;
+                return Poll::Ready(Some(Err(Error::Timeout(self.idle_timeout))));
+            }
+            match self.ws.poll_ready_unpin(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
+                Poll::Ready(Ok(())) => {}
+            }
+            if let Err(e) = self.ws.start_send_unpin(Message::Ping(Default::default())) {
+                return Poll::Ready(Some(Err(e.into())));
+            }
+            // Later reads flush the ping if this can't finish now.
+            if let Poll::Ready(Err(e)) = self.ws.poll_flush_unpin(cx) {
+                return Poll::Ready(Some(Err(e.into())));
+            }
+            self.pinged = true;
+            let deadline = self.last_seen + self.idle_timeout;
+            self.timer.as_mut().reset(deadline);
+        }
+        Poll::Pending
     }
 }
 
@@ -304,6 +378,73 @@ mod tests {
                 .map(|(k, v)| (Value::from(k), v))
                 .collect(),
         )
+    }
+
+    /// Starts a websocket server and returns its URL. `serve` gets each
+    /// accepted connection after the handshake.
+    async fn ws_server<F, Fut>(serve: F) -> String
+    where
+        F: FnOnce(WebSocketStream<TcpStream>) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send,
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            serve(tokio_tungstenite::accept_async(sock).await.unwrap()).await;
+        });
+        url
+    }
+
+    const SHORT: Duration = Duration::from_millis(200);
+
+    #[tokio::test]
+    async fn dead_connection_times_out_then_ends() {
+        // Completes the handshake, then never reads again, so pings go unanswered.
+        let url = ws_server(|ws| async move {
+            let _hold = ws;
+            std::future::pending::<()>().await;
+        })
+        .await;
+        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        feed.set_idle_timeout(SHORT);
+
+        let started = std::time::Instant::now();
+        let err = feed.next().await.unwrap().unwrap_err();
+        assert!(matches!(err, Error::Timeout(d) if d == SHORT), "{err:?}");
+        assert!(started.elapsed() >= SHORT);
+        assert!(
+            feed.next().await.is_none(),
+            "feed should end after a timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn quiet_but_alive_connection_stays_open() {
+        // Sends no data but keeps reading, so tungstenite answers our pings.
+        let url = ws_server(|mut ws| async move { while ws.next().await.is_some() {} }).await;
+        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        feed.set_idle_timeout(SHORT);
+
+        let waited = tokio::time::timeout(SHORT * 4, feed.next()).await;
+        assert!(
+            waited.is_err(),
+            "expected no event and no timeout, got {waited:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn data_is_delivered() {
+        let url = ws_server(|mut ws| async move {
+            ws.send(Message::Binary(frame("hello", map(vec![])).into()))
+                .await
+                .unwrap();
+            while ws.next().await.is_some() {}
+        })
+        .await;
+        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let ev = feed.next().await.unwrap().unwrap();
+        assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
     }
 
     #[test]

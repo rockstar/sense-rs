@@ -147,6 +147,11 @@ pub struct RealtimeFeed {
 }
 
 impl RealtimeFeed {
+    /// See [`crate::realtime::RealtimeFeed::set_idle_timeout`].
+    pub fn set_idle_timeout(&mut self, timeout: std::time::Duration) {
+        self.inner.set_idle_timeout(timeout)
+    }
+
     /// See [`crate::realtime::RealtimeFeed::start_updates`].
     pub fn start_updates(&mut self) -> Result<()> {
         self.rt.block_on(self.inner.start_updates())

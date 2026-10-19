@@ -17,6 +17,11 @@ pub enum Error {
     #[error("sense api error ({status}): {}", reason.as_deref().unwrap_or("no reason given"))]
     Api { status: u16, reason: Option<String> },
 
+    /// The realtime feed received nothing, not even a pong, for this long.
+    /// The connection is presumed dead; open a new feed.
+    #[error("realtime feed silent for {0:?}; connection presumed dead")]
+    Timeout(std::time::Duration),
+
     /// The realtime feed sent an `error` message.
     #[error("realtime feed error: {0}")]
     Realtime(String),
