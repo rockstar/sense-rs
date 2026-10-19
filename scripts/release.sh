@@ -82,7 +82,10 @@ else
   fi
 
   # Refresh Cargo.lock and make sure everything still builds.
-  cargo check --all-targets --quiet
+  if ! cargo check --all-targets --quiet; then
+    git checkout -- Cargo.toml Cargo.lock
+    exit 1
+  fi
 
   git add Cargo.toml Cargo.lock
   git commit -m "chore: release $version"
