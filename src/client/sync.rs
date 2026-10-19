@@ -46,7 +46,7 @@ impl Client {
             .worker_threads(1)
             .enable_all()
             .build()
-            .map_err(|e| Error::Decode(format!("failed to start runtime: {e}")))?;
+            .map_err(Error::Runtime)?;
         Ok(Self {
             inner,
             rt: Arc::new(rt),

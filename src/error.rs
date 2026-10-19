@@ -24,6 +24,10 @@ pub enum Error {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
 
+    /// The blocking client couldn't start its Tokio runtime.
+    #[error("failed to start runtime: {0}")]
+    Runtime(#[source] std::io::Error),
+
     #[error(transparent)]
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
 
