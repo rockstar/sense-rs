@@ -37,7 +37,7 @@ pub struct Client {
 impl Client {
     /// A client with default settings and no session.
     pub fn new() -> Result<Self> {
-        Self::from_async(crate::Client::new())
+        Self::from_async(crate::Client::builder().build()?)
     }
 
     /// Wrap an async client, e.g. one built with [`crate::Client::builder`].
