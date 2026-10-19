@@ -42,6 +42,7 @@ for event in client.realtime(client.default_monitor_id().unwrap())? { /* ... */ 
 
 - Auth: `login`, `login_mfa`, `renew`, `logout`. Expired tokens renew automatically on a 401.
   Save `client.session()` and restore it with `set_session` to skip logging in.
+  Renewals replace both tokens, so save the session again before exiting.
 - Monitors: `monitor_overview`, `monitor_status`
 - Devices: `devices`, `device`
 - History: `trends`, `usage`, `cumulative`

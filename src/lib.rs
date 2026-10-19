@@ -34,7 +34,8 @@
 //!
 //! Save [`Client::session`] to avoid logging in every time, and restore it
 //! with [`ClientBuilder::session`] or [`Client::set_session`]. Expired access
-//! tokens are renewed automatically.
+//! tokens are renewed automatically. A renewal replaces both the access and
+//! refresh tokens, so save the session again before exiting.
 //!
 //! Response types are in [`models`]; live-feed types are in [`realtime`].
 

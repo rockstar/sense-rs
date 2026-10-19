@@ -127,6 +127,8 @@ impl Client {
 
     /// The current session, if logged in. Persist it and pass it to
     /// [`set_session`](Self::set_session) later to skip logging in.
+    /// Automatic renewals replace both tokens, so persist it again before
+    /// exiting.
     pub fn session(&self) -> Option<Session> {
         self.inner
             .session
