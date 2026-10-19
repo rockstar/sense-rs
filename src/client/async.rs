@@ -27,6 +27,8 @@ struct Inner {
     api_url: String,
     realtime_url: String,
     session: RwLock<Option<Session>>,
+    /// Held while renewing, so concurrent 401s trigger only one `/renew`.
+    renew_lock: tokio::sync::Mutex<()>,
 }
 
 /// Configures a [`Client`].
@@ -79,6 +81,7 @@ impl ClientBuilder {
                 api_url: self.api_url,
                 realtime_url: self.realtime_url,
                 session: RwLock::new(self.session),
+                renew_lock: tokio::sync::Mutex::new(()),
             }),
         })
     }
@@ -158,6 +161,21 @@ impl Client {
     ///
     /// Requests that get a 401 call this automatically, so you rarely need it.
     pub async fn renew(&self) -> Result<()> {
+        let _guard = self.inner.renew_lock.lock().await;
+        self.renew_unlocked().await
+    }
+
+    /// Renew after `failed_token` got a 401, unless another task already did.
+    async fn renew_after_401(&self, failed_token: &str) -> Result<()> {
+        let _guard = self.inner.renew_lock.lock().await;
+        if self.access_token()? != failed_token {
+            return Ok(()); // renewed while we waited; just retry
+        }
+        self.renew_unlocked().await
+    }
+
+    /// Callers must hold `renew_lock`.
+    async fn renew_unlocked(&self) -> Result<()> {
         let session = self.session().ok_or(Error::NotAuthenticated)?;
         let user_id = session.user_id.to_string();
         let form = [
@@ -280,9 +298,10 @@ impl Client {
             "{}monitors/{monitor_id}/realtimefeed",
             self.inner.realtime_url
         );
-        match RealtimeFeed::connect(&url, &self.access_token()?).await {
+        let token = self.access_token()?;
+        match RealtimeFeed::connect(&url, &token).await {
             Err(Error::Api { status: 401, .. }) => {
-                self.renew().await?;
+                self.renew_after_401(&token).await?;
                 RealtimeFeed::connect(&url, &self.access_token()?).await
             }
             other => other,
@@ -350,8 +369,8 @@ impl Client {
         let (mut status, mut body) = self
             .request_once(method.clone(), path, query, form, token.as_deref())
             .await?;
-        if status == StatusCode::UNAUTHORIZED && authed {
-            self.renew().await?;
+        if let (StatusCode::UNAUTHORIZED, Some(sent)) = (status, &token) {
+            self.renew_after_401(sent).await?;
             let token = self.access_token()?;
             (status, body) = self
                 .request_once(method, path, query, form, Some(&token))
@@ -482,49 +501,60 @@ mod tests {
         body: String,
     }
 
+    /// Reads one HTTP request from `sock`.
+    async fn read_request(sock: &mut tokio::net::TcpStream) -> Seen {
+        use tokio::io::AsyncReadExt;
+
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let header_end = loop {
+            let n = sock.read(&mut chunk).await.unwrap();
+            buf.extend_from_slice(&chunk[..n]);
+            if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break i + 4;
+            }
+        };
+        let head = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+        let header = |name: &str| {
+            head.lines().find_map(|l| {
+                let (k, v) = l.split_once(':')?;
+                k.eq_ignore_ascii_case(name).then(|| v.trim().to_string())
+            })
+        };
+        let len: usize = header("content-length").map_or(0, |v| v.parse().unwrap());
+        while buf.len() < header_end + len {
+            let n = sock.read(&mut chunk).await.unwrap();
+            buf.extend_from_slice(&chunk[..n]);
+        }
+        Seen {
+            line: head.lines().next().unwrap().to_string(),
+            auth: header("authorization"),
+            body: String::from_utf8_lossy(&buf[header_end..]).into_owned(),
+        }
+    }
+
+    async fn write_response(sock: &mut tokio::net::TcpStream, (status, body): (u16, &str)) {
+        use tokio::io::AsyncWriteExt;
+
+        let resp = format!(
+            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        sock.write_all(resp.as_bytes()).await.unwrap();
+    }
+
     /// Serves `replies` in order, one per connection, and returns what it saw.
     async fn mock_server(
         replies: Vec<(u16, &'static str)>,
     ) -> (String, tokio::task::JoinHandle<Vec<Seen>>) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         let handle = tokio::spawn(async move {
             let mut seen = Vec::new();
-            for (status, body) in replies {
+            for reply in replies {
                 let (mut sock, _) = listener.accept().await.unwrap();
-                let mut buf = Vec::new();
-                let mut chunk = [0u8; 4096];
-                let header_end = loop {
-                    let n = sock.read(&mut chunk).await.unwrap();
-                    buf.extend_from_slice(&chunk[..n]);
-                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                        break i + 4;
-                    }
-                };
-                let head = String::from_utf8_lossy(&buf[..header_end]).into_owned();
-                let header = |name: &str| {
-                    head.lines().find_map(|l| {
-                        let (k, v) = l.split_once(':')?;
-                        k.eq_ignore_ascii_case(name).then(|| v.trim().to_string())
-                    })
-                };
-                let len: usize = header("content-length").map_or(0, |v| v.parse().unwrap());
-                while buf.len() < header_end + len {
-                    let n = sock.read(&mut chunk).await.unwrap();
-                    buf.extend_from_slice(&chunk[..n]);
-                }
-                seen.push(Seen {
-                    line: head.lines().next().unwrap().to_string(),
-                    auth: header("authorization"),
-                    body: String::from_utf8_lossy(&buf[header_end..]).into_owned(),
-                });
-                let resp = format!(
-                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                sock.write_all(resp.as_bytes()).await.unwrap();
+                seen.push(read_request(&mut sock).await);
+                write_response(&mut sock, reply).await;
             }
             seen
         });
@@ -605,6 +635,47 @@ mod tests {
         let session = client.session().unwrap();
         assert_eq!(session.access_token, "new-access");
         assert_eq!(session.refresh_token, "new-refresh");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_401s_renew_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let renews = Arc::new(AtomicUsize::new(0));
+        // Holds both expired requests until each has arrived, so both 401s
+        // reach the client before either renew can start.
+        let both_expired = Arc::new(tokio::sync::Barrier::new(2));
+        {
+            let renews = renews.clone();
+            tokio::spawn(async move {
+                loop {
+                    let (mut sock, _) = listener.accept().await.unwrap();
+                    let (renews, both_expired) = (renews.clone(), both_expired.clone());
+                    tokio::spawn(async move {
+                        let req = read_request(&mut sock).await;
+                        let reply = if req.line.starts_with("POST /renew ") {
+                            renews.fetch_add(1, Ordering::SeqCst);
+                            RENEWED
+                        } else if req.auth.as_deref() == Some("bearer old-access") {
+                            both_expired.wait().await;
+                            EXPIRED
+                        } else {
+                            (200, "{}")
+                        };
+                        write_response(&mut sock, reply).await;
+                    });
+                }
+            });
+        }
+        let client = client_for(url);
+
+        let (a, b) = tokio::join!(client.monitor_status(1), client.monitor_status(2));
+
+        a.unwrap();
+        b.unwrap();
+        assert_eq!(renews.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
