@@ -1,8 +1,8 @@
 //! Response types for the Sense REST API.
 //!
-//! Field names follow the wire format used by the Sense Android app. Almost
-//! everything is optional because the API omits fields freely. Endpoints that
-//! this crate does not model can be reached with
+//! Field names follow the API's wire format. Almost everything is optional
+//! because the API omits fields freely. Endpoints that this crate does not
+//! model can be reached with
 //! [`Client::get_json`](crate::Client::get_json).
 
 use std::collections::HashMap;

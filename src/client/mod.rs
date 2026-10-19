@@ -6,5 +6,5 @@ pub mod sync;
 
 pub use r#async::{Client, ClientBuilder};
 
-/// Matches `Constants.SENSE_PROTOCOL_VERSION` in the Android app.
+/// Sent as the `X-Sense-Protocol` header.
 pub(crate) const PROTOCOL_VERSION: &str = "12";

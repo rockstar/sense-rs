@@ -107,8 +107,7 @@ impl RealtimeFeed {
 
     /// Ask the server to (re)start sending realtime updates.
     ///
-    /// Called on connect. The Android app re-sends it after periods of
-    /// inactivity; do the same if updates stop arriving.
+    /// Called on connect. Call it again if updates stop arriving.
     pub async fn start_updates(&mut self) -> Result<()> {
         self.send_command("start_realtime_updates").await
     }
@@ -331,7 +330,7 @@ fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
         .as_str()
         .ok_or_else(|| Error::Decode("message type is not a string".into()))?
         .to_string();
-    // The frame layout is from the decompiled app; accept a float timestamp too.
+    // Accept a float timestamp too.
     let epoch = epoch
         .as_i64()
         .or_else(|| epoch.as_f64().map(|f| f as i64))

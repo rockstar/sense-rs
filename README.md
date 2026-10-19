@@ -1,7 +1,7 @@
 # sense-rs
 
 Unofficial Rust client for the [Sense](https://sense.com) home energy monitor API.
-The API is undocumented. This crate follows what the Sense Android app (2024.8) does.
+The API is undocumented and may change without notice.
 
 ```toml
 [dependencies]

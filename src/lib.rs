@@ -1,7 +1,7 @@
 //! Unofficial client for the [Sense](https://sense.com) energy monitor API.
 //!
-//! The API is undocumented; this crate follows what the Sense Android app
-//! does. The default API is async. A blocking API lives in [`sync`].
+//! The API is undocumented and may change without notice. The default API is
+//! async. A blocking API lives in [`sync`].
 //!
 //! ```no_run
 //! use futures_util::StreamExt;
