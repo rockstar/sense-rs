@@ -301,9 +301,9 @@ pub struct RealtimeDevice {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Delta {
     pub device_id: Option<String>,
-    pub w: f64,
-    pub channel: i64,
-    pub frame: i64,
+    pub w: Option<f64>,
+    pub channel: Option<i64>,
+    pub frame: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -503,6 +503,13 @@ mod tests {
                     ("w", Value::from(150.0)),
                 ])]),
             ),
+            (
+                "deltas",
+                Value::Array(vec![
+                    map(vec![("w", Value::Nil), ("channel", Value::from(1))]),
+                    map(vec![("w", Value::from(5.0)), ("frame", Value::from(2))]),
+                ]),
+            ),
             ("something_new", Value::from(true)),
         ]);
         let ev = decode_frame(&frame("realtime_update", payload)).unwrap();
@@ -514,6 +521,8 @@ mod tests {
         assert_eq!(u.solar_w, Some(-50.5));
         assert_eq!(u.voltage, vec![120.1, 119.8]);
         assert_eq!(u.devices[0].name.as_deref(), Some("Fridge"));
+        assert_eq!(u.deltas[0].w, None);
+        assert_eq!(u.deltas[1].channel, None);
     }
 
     #[test]

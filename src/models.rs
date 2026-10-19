@@ -180,9 +180,9 @@ pub struct Device {
     pub tags: HashMap<String, serde_json::Value>,
     pub pct: Option<f64>,
     #[serde(default)]
-    pub history: Vec<f64>,
+    pub history: Vec<Option<f64>>,
     #[serde(default)]
-    pub cost_history: Vec<f64>,
+    pub cost_history: Vec<Option<f64>>,
     /// Cents.
     pub total_cost: Option<f64>,
     pub total_kwh: Option<f64>,
@@ -278,7 +278,7 @@ pub struct EnergyTotals {
     #[serde(default)]
     pub totals: Vec<Option<f64>>,
     #[serde(default)]
-    pub total_costs: Vec<f64>,
+    pub total_costs: Vec<Option<f64>>,
     #[serde(default)]
     pub devices: Vec<Device>,
 }
@@ -351,8 +351,8 @@ mod tests {
                     "total": 1.5,
                     "total_cost": 412.5,
                     "totals": [0.5, 1.0, null],
-                    "total_costs": [10.25, 20.5],
-                    "devices": [{"id": "x", "total_cost": 1.5, "cost_history": [0.5]}]
+                    "total_costs": [10.25, null],
+                    "devices": [{"id": "x", "total_cost": 1.5, "cost_history": [0.5, null]}]
                 },
                 "grid_to_battery": {"total_kwh": 1.0, "cost": 2.5}
             }"#,
@@ -361,6 +361,8 @@ mod tests {
         let consumption = trends.consumption.unwrap();
         assert_eq!(consumption.total_cost, Some(412.5));
         assert_eq!(consumption.totals, vec![Some(0.5), Some(1.0), None]);
+        assert_eq!(consumption.total_costs, vec![Some(10.25), None]);
+        assert_eq!(consumption.devices[0].cost_history, vec![Some(0.5), None]);
         assert_eq!(consumption.devices[0].name, None);
     }
 }
