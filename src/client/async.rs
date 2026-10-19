@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -217,6 +218,7 @@ impl Client {
     /// Full details for one device. Returned as raw JSON because the shape
     /// varies a lot by device type.
     pub async fn device(&self, monitor_id: i64, device_id: &str) -> Result<serde_json::Value> {
+        let device_id = path_segment(device_id)?;
         self.get(
             &format!("app/monitors/{monitor_id}/devices/{device_id}"),
             &[],
@@ -387,6 +389,26 @@ impl Client {
     }
 }
 
+/// Percent-encodes `s` as a single URL path segment, so `/`, `?` and `#`
+/// can't change which endpoint a request goes to.
+fn path_segment(s: &str) -> Result<String> {
+    // URL parsers treat these as navigation even when percent-encoded.
+    if matches!(s, "" | "." | "..") {
+        return Err(Error::InvalidArgument(format!(
+            "invalid path segment {s:?}"
+        )));
+    }
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+            out.push(char::from(b));
+        } else {
+            write!(out, "%{b:02X}").unwrap();
+        }
+    }
+    Ok(out)
+}
+
 fn api_error(status: StatusCode, body: &[u8]) -> Error {
     let parsed: Option<ApiErrorBody> = serde_json::from_slice(body).ok();
     if let Some(mfa_token) = parsed.as_ref().and_then(|b| b.mfa_token.clone()) {
@@ -527,6 +549,34 @@ mod tests {
         200,
         r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
     );
+
+    #[test]
+    fn path_segment_escapes_separators() {
+        assert_eq!(path_segment("abc-1_2.3~").unwrap(), "abc-1_2.3~");
+        assert_eq!(path_segment("../users/1").unwrap(), "..%2Fusers%2F1");
+        assert_eq!(path_segment("a?b#c d").unwrap(), "a%3Fb%23c%20d");
+        assert_eq!(path_segment("é").unwrap(), "%C3%A9");
+        for bad in ["", ".", ".."] {
+            assert!(
+                matches!(path_segment(bad), Err(Error::InvalidArgument(_))),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn device_id_stays_in_its_segment() {
+        let (url, server) = mock_server(vec![(200, "{}")]).await;
+        client_for(url).device(1, "../../users/7?x").await.unwrap();
+        let seen = server.await.unwrap();
+        assert!(
+            seen[0]
+                .line
+                .starts_with("GET /app/monitors/1/devices/..%2F..%2Fusers%2F7%3Fx "),
+            "{}",
+            seen[0].line
+        );
+    }
 
     #[tokio::test]
     async fn renews_and_retries_once_on_401() {

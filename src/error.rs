@@ -9,6 +9,10 @@ pub enum Error {
     #[error("not authenticated")]
     NotAuthenticated,
 
+    /// An argument can't be used, e.g. a device ID of `..`.
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+
     /// The API returned a non-success status.
     #[error("sense api error ({status}): {}", reason.as_deref().unwrap_or("no reason given"))]
     Api { status: u16, reason: Option<String> },
