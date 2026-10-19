@@ -324,23 +324,12 @@ fn encode_command(command: &str, epoch: u64) -> Vec<u8> {
 fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
     let mut cur = bytes;
     let mut next = || rmpv::decode::read_value(&mut cur).map_err(|e| Error::Decode(e.to_string()));
-    let first = next()?;
-    // Accept a single [type, epoch, payload] array too, in case the server wraps it.
-    let (kind, epoch, payload) = match first {
-        rmpv::Value::Array(mut v) if v.len() == 3 => {
-            let payload = v.pop().unwrap();
-            let epoch = v.pop().unwrap();
-            (v.pop().unwrap(), epoch, payload)
-        }
-        kind => {
-            let epoch = next()?;
-            let payload = next().unwrap_or(rmpv::Value::Nil);
-            (kind, epoch, payload)
-        }
-    };
+    let kind = next()?;
+    let epoch = next()?;
+    let payload = next().unwrap_or(rmpv::Value::Nil);
     let kind = kind
         .as_str()
-        .ok_or_else(|| Error::Decode(format!("message type is not a string: {kind}")))?
+        .ok_or_else(|| Error::Decode("message type is not a string".into()))?
         .to_string();
     // The frame layout is from the decompiled app; accept a float timestamp too.
     let epoch = epoch
@@ -558,24 +547,11 @@ mod tests {
     }
 
     #[test]
-    fn decodes_wrapped_array() {
-        let mut buf = Vec::new();
-        let v = Value::Array(vec![Value::from("hello"), Value::from(5), map(vec![])]);
-        rmpv::encode::write_value(&mut buf, &v).unwrap();
-        let ev = decode_frame(&buf).unwrap();
-        assert_eq!(ev.epoch, 5);
-        assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
-    }
-
-    #[test]
     fn float_epoch_is_truncated() {
         let mut buf = Vec::new();
-        let v = Value::Array(vec![
-            Value::from("hello"),
-            Value::from(1700000000.5),
-            map(vec![]),
-        ]);
-        rmpv::encode::write_value(&mut buf, &v).unwrap();
+        for v in [Value::from("hello"), Value::from(1700000000.5), map(vec![])] {
+            rmpv::encode::write_value(&mut buf, &v).unwrap();
+        }
         assert_eq!(decode_frame(&buf).unwrap().epoch, 1700000000);
     }
 }
