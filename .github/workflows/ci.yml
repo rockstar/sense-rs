@@ -22,3 +22,4 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all-targets
       - run: cargo test --doc
+      - uses: obi1kenobi/cargo-semver-checks-action@v2

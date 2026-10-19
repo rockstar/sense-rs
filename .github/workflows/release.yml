@@ -28,6 +28,7 @@ jobs:
             exit 1
           fi
       - run: cargo test --all-targets
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
       - run: cargo publish

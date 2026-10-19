@@ -29,3 +29,10 @@ repos:
         language: system
         types_or: [rust, toml]
         pass_filenames: false
+
+      - id: cargo-semver-checks
+        name: cargo semver-checks
+        entry: cargo semver-checks
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false
