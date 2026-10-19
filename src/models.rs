@@ -11,7 +11,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 /// Returned by `POST /authenticate` and `POST /authenticate/mfa`.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+///
+/// `Debug` output hides the tokens.
+#[derive(Clone, Deserialize, Serialize)]
 pub struct AuthResponse {
     #[serde(default)]
     pub authorized: bool,
@@ -29,14 +31,16 @@ pub struct AuthResponse {
 }
 
 /// Returned by `POST /renew`.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub(crate) struct TokenResponse {
     pub access_token: String,
     pub refresh_token: String,
 }
 
 /// Credentials for an authenticated session. Save these to skip logging in again.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+///
+/// `Debug` output hides the tokens.
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Session {
     pub access_token: String,
     pub refresh_token: String,
@@ -44,6 +48,35 @@ pub struct Session {
     /// Monitor ids returned at login. Empty when restoring a session from tokens alone.
     #[serde(default)]
     pub monitor_ids: Vec<i64>,
+}
+
+const REDACTED: &str = "<redacted>";
+
+impl fmt::Debug for AuthResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthResponse")
+            .field("authorized", &self.authorized)
+            .field("account_id", &self.account_id)
+            .field("user_id", &self.user_id)
+            .field("access_token", &REDACTED)
+            .field("refresh_token", &REDACTED)
+            .field("monitors", &self.monitors)
+            .field("date_created", &self.date_created)
+            .field("ab_cohort", &self.ab_cohort)
+            .field("settings", &self.settings)
+            .finish()
+    }
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Session")
+            .field("access_token", &REDACTED)
+            .field("refresh_token", &REDACTED)
+            .field("user_id", &self.user_id)
+            .field("monitor_ids", &self.monitor_ids)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -287,4 +320,27 @@ pub(crate) struct ApiErrorBody {
     pub status: Option<String>,
     pub error_reason: Option<String>,
     pub mfa_token: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_hides_tokens() {
+        let session = Session {
+            access_token: "secret-access".into(),
+            refresh_token: "secret-refresh".into(),
+            user_id: 7,
+            monitor_ids: vec![1],
+        };
+        let auth: AuthResponse = serde_json::from_str(
+            r#"{"access_token":"secret-access","refresh_token":"secret-refresh","user_id":7}"#,
+        )
+        .unwrap();
+        for out in [format!("{session:?}"), format!("{auth:?}")] {
+            assert!(!out.contains("secret"), "{out}");
+            assert!(out.contains("user_id: 7"), "{out}");
+        }
+    }
 }
