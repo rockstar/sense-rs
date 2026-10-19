@@ -696,6 +696,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // The handshake callback's error type is fixed by tungstenite.
+    #[allow(clippy::result_large_err)]
     async fn realtime_renews_and_reconnects_on_401_handshake() {
         use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
