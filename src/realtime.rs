@@ -325,10 +325,16 @@ fn encode_command(command: &str, epoch: u64) -> Vec<u8> {
 
 fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
     let mut cur = bytes;
-    let mut next = || rmpv::decode::read_value(&mut cur).map_err(|e| Error::Decode(e.to_string()));
-    let kind = next()?;
-    let epoch = next()?;
-    let payload = next().unwrap_or(rmpv::Value::Map(Vec::new()));
+    let next =
+        |cur: &mut &[u8]| rmpv::decode::read_value(cur).map_err(|e| Error::Decode(e.to_string()));
+    let kind = next(&mut cur)?;
+    let epoch = next(&mut cur)?;
+    // Only a missing payload means empty; a truncated one is an error.
+    let payload = if cur.is_empty() {
+        rmpv::Value::Map(Vec::new())
+    } else {
+        next(&mut cur)?
+    };
     let kind = kind
         .as_str()
         .ok_or_else(|| Error::Decode("message type is not a string".into()))?
@@ -337,7 +343,7 @@ fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
     let epoch = epoch
         .as_i64()
         .or_else(|| epoch.as_f64().map(|f| f as i64))
-        .unwrap_or_default();
+        .ok_or_else(|| Error::Decode("timestamp is not a number".into()))?;
 
     let message = match kind.as_str() {
         "hello" => RealtimeMessage::Hello(from_msgpack(payload)?),
@@ -587,5 +593,21 @@ mod tests {
         }
         let ev = decode_frame(&buf).unwrap();
         assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
+    }
+
+    #[test]
+    fn truncated_payload_is_decode_error() {
+        let mut buf = frame("hello", map(vec![("online", Value::from(true))]));
+        buf.pop();
+        assert!(matches!(decode_frame(&buf), Err(Error::Decode(_))));
+    }
+
+    #[test]
+    fn non_numeric_epoch_is_decode_error() {
+        let mut buf = Vec::new();
+        for v in [Value::from("hello"), Value::from("soon"), map(vec![])] {
+            rmpv::encode::write_value(&mut buf, &v).unwrap();
+        }
+        assert!(matches!(decode_frame(&buf), Err(Error::Decode(_))));
     }
 }
