@@ -756,6 +756,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn renew_does_not_overwrite_a_newer_login() {
+        use tokio::sync::Notify;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        // Holds the renew reply until the test has swapped in a new session.
+        let (arrived, release) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
+        {
+            let (arrived, release) = (arrived.clone(), release.clone());
+            tokio::spawn(async move {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                read_request(&mut sock).await;
+                arrived.notify_one();
+                release.notified().await;
+                write_response(&mut sock, RENEWED).await;
+            });
+        }
+        let client = client_for(url);
+
+        let (renewed, ()) = tokio::join!(client.renew(), async {
+            arrived.notified().await;
+            client.set_session(Some(Session {
+                access_token: "login-access".into(),
+                refresh_token: "login-refresh".into(),
+                user_id: 8,
+                monitor_ids: vec![2],
+            }));
+            release.notify_one();
+        });
+
+        renewed.unwrap();
+        let session = client.session().unwrap();
+        assert_eq!(session.access_token, "login-access");
+        assert_eq!(session.refresh_token, "login-refresh");
+        assert_eq!(session.user_id, 8);
+    }
+
+    #[tokio::test]
     async fn second_401_is_returned_not_retried() {
         let (url, server) = mock_server(vec![EXPIRED, RENEWED, EXPIRED]).await;
         let client = client_for(url);
