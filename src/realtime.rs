@@ -342,7 +342,11 @@ fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
         .as_str()
         .ok_or_else(|| Error::Decode(format!("message type is not a string: {kind}")))?
         .to_string();
-    let epoch = epoch.as_i64().unwrap_or_default();
+    // The frame layout is from the decompiled app; accept a float timestamp too.
+    let epoch = epoch
+        .as_i64()
+        .or_else(|| epoch.as_f64().map(|f| f as i64))
+        .unwrap_or_default();
 
     let message = match kind.as_str() {
         "hello" => RealtimeMessage::Hello(from_msgpack(payload)?),
@@ -561,5 +565,17 @@ mod tests {
         let ev = decode_frame(&buf).unwrap();
         assert_eq!(ev.epoch, 5);
         assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
+    }
+
+    #[test]
+    fn float_epoch_is_truncated() {
+        let mut buf = Vec::new();
+        let v = Value::Array(vec![
+            Value::from("hello"),
+            Value::from(1700000000.5),
+            map(vec![]),
+        ]);
+        rmpv::encode::write_value(&mut buf, &v).unwrap();
+        assert_eq!(decode_frame(&buf).unwrap().epoch, 1700000000);
     }
 }
