@@ -170,7 +170,7 @@ pub struct DevicesOverview {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Device {
     pub id: Option<String>,
-    pub name: String,
+    pub name: Option<String>,
     pub make: Option<String>,
     pub model: Option<String>,
     pub location: Option<String>,
@@ -182,16 +182,16 @@ pub struct Device {
     #[serde(default)]
     pub history: Vec<f64>,
     #[serde(default)]
-    pub cost_history: Vec<i64>,
+    pub cost_history: Vec<f64>,
     /// Cents.
-    pub total_cost: Option<i64>,
+    pub total_cost: Option<f64>,
     pub total_kwh: Option<f64>,
     pub num_times_on: Option<i64>,
     pub total_time_on: Option<f64>,
     pub percent_change: Option<f64>,
     pub peak_wattage: Option<f64>,
     pub kwh_change: Option<f64>,
-    pub cost_change_cents: Option<i64>,
+    pub cost_change_cents: Option<f64>,
 }
 
 /// Time range bucket for history endpoints.
@@ -249,7 +249,7 @@ pub struct Trends {
     pub consumption_percent_change: Option<f64>,
     pub production_percent_change: Option<f64>,
     pub consumption_kwh_change: Option<f64>,
-    pub consumption_cost_change_cents: Option<i64>,
+    pub consumption_cost_change_cents: Option<f64>,
     pub from_grid: Option<f64>,
     pub from_grid_cost: Option<f64>,
     pub to_grid: Option<f64>,
@@ -273,12 +273,12 @@ pub struct EnergyTotals {
     #[serde(default)]
     pub total: f64,
     /// Cents.
-    pub total_cost: Option<i64>,
+    pub total_cost: Option<f64>,
     /// kWh per step.
     #[serde(default)]
-    pub totals: Vec<f64>,
+    pub totals: Vec<Option<f64>>,
     #[serde(default)]
-    pub total_costs: Vec<i64>,
+    pub total_costs: Vec<f64>,
     #[serde(default)]
     pub devices: Vec<Device>,
 }
@@ -287,7 +287,7 @@ pub struct EnergyTotals {
 pub struct EnergyFlow {
     pub total_kwh: Option<f64>,
     /// Cents.
-    pub cost: Option<i64>,
+    pub cost: Option<f64>,
 }
 
 /// Returned by `GET app/history/usage`.
@@ -340,5 +340,27 @@ mod tests {
             assert!(!out.contains("secret"), "{out}");
             assert!(out.contains("user_id: 7"), "{out}");
         }
+    }
+
+    #[test]
+    fn trends_tolerates_fractional_costs_nulls_and_unnamed_devices() {
+        let trends: Trends = serde_json::from_str(
+            r#"{
+                "consumption_cost_change_cents": -3.5,
+                "consumption": {
+                    "total": 1.5,
+                    "total_cost": 412.5,
+                    "totals": [0.5, 1.0, null],
+                    "total_costs": [10.25, 20.5],
+                    "devices": [{"id": "x", "total_cost": 1.5, "cost_history": [0.5]}]
+                },
+                "grid_to_battery": {"total_kwh": 1.0, "cost": 2.5}
+            }"#,
+        )
+        .unwrap();
+        let consumption = trends.consumption.unwrap();
+        assert_eq!(consumption.total_cost, Some(412.5));
+        assert_eq!(consumption.totals, vec![Some(0.5), Some(1.0), None]);
+        assert_eq!(consumption.devices[0].name, None);
     }
 }

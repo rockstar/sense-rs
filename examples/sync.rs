@@ -27,7 +27,7 @@ fn main() -> sense::Result<()> {
         println!("Today: {:.2} kWh", c.total);
     }
     for device in client.devices(monitor)?.devices {
-        println!("  {}", device.name);
+        println!("  {}", device.name.as_deref().unwrap_or("(unnamed)"));
     }
     Ok(())
 }
