@@ -331,7 +331,7 @@ fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
     let mut next = || rmpv::decode::read_value(&mut cur).map_err(|e| Error::Decode(e.to_string()));
     let kind = next()?;
     let epoch = next()?;
-    let payload = next().unwrap_or(rmpv::Value::Nil);
+    let payload = next().unwrap_or(rmpv::Value::Map(Vec::new()));
     let kind = kind
         .as_str()
         .ok_or_else(|| Error::Decode("message type is not a string".into()))?
@@ -576,5 +576,15 @@ mod tests {
             rmpv::encode::write_value(&mut buf, &v).unwrap();
         }
         assert_eq!(decode_frame(&buf).unwrap().epoch, 1700000000);
+    }
+
+    #[test]
+    fn missing_payload_is_empty_map() {
+        let mut buf = Vec::new();
+        for v in [Value::from("hello"), Value::from(1700000000)] {
+            rmpv::encode::write_value(&mut buf, &v).unwrap();
+        }
+        let ev = decode_frame(&buf).unwrap();
+        assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
     }
 }
