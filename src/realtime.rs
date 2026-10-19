@@ -64,16 +64,12 @@ impl RealtimeFeed {
     }
 
     async fn send_command(&mut self, command: &str) -> Result<()> {
-        let mut buf = Vec::new();
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        // Writing to a Vec cannot fail.
-        rmp::encode::write_str(&mut buf, command).unwrap();
-        rmp::encode::write_uint(&mut buf, epoch).unwrap();
-        rmp::encode::write_map_len(&mut buf, 0).unwrap();
-        self.ws.send(Message::Binary(buf.into())).await?;
+        let frame = encode_command(command, epoch);
+        self.ws.send(Message::Binary(frame.into())).await?;
         Ok(())
     }
 
@@ -225,6 +221,20 @@ struct ErrorPayload {
     error_reason: Option<String>,
 }
 
+/// A command frame: the command name, a unix timestamp, and an empty map.
+fn encode_command(command: &str, epoch: u64) -> Vec<u8> {
+    let mut buf = Vec::new();
+    for v in [
+        rmpv::Value::from(command),
+        rmpv::Value::from(epoch),
+        rmpv::Value::Map(Vec::new()),
+    ] {
+        // Writing to a Vec cannot fail.
+        rmpv::encode::write_value(&mut buf, &v).unwrap();
+    }
+    buf
+}
+
 fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
     let mut cur = bytes;
     let mut next = || rmpv::decode::read_value(&mut cur).map_err(|e| Error::Decode(e.to_string()));
@@ -294,6 +304,18 @@ mod tests {
                 .map(|(k, v)| (Value::from(k), v))
                 .collect(),
         )
+    }
+
+    #[test]
+    fn encodes_start_command() {
+        let mut expected = vec![0xb6]; // fixstr, 22 bytes
+        expected.extend_from_slice(b"start_realtime_updates");
+        expected.extend_from_slice(&[0xce, 0x65, 0x53, 0xf1, 0x00]); // uint32 1_700_000_000
+        expected.push(0x80); // empty fixmap
+        assert_eq!(
+            encode_command("start_realtime_updates", 1_700_000_000),
+            expected
+        );
     }
 
     #[test]
