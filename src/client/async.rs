@@ -810,6 +810,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn login_with_mfa_stores_session() {
+        let (url, server) = mock_server(vec![
+            (401, r#"{"status":"mfa_required","mfa_token":"mfa-1"}"#),
+            (
+                200,
+                r#"{"user_id":9,"access_token":"a","refresh_token":"r","monitors":[{"id":42},{"id":43}]}"#,
+            ),
+        ])
+        .await;
+        let client = Client::builder().api_url(url).build().unwrap();
+
+        let err = client.login("me@x.com", "pw").await.unwrap_err();
+        let Error::MfaRequired { mfa_token } = err else {
+            panic!("{err:?}")
+        };
+        client.login_mfa(&mfa_token, "123456").await.unwrap();
+
+        let seen = server.await.unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(seen[0].line.starts_with("POST /authenticate "));
+        assert_eq!(seen[0].body, "email=me%40x.com&password=pw");
+        assert!(seen[1].line.starts_with("POST /authenticate/mfa "));
+        assert!(
+            seen[1]
+                .body
+                .starts_with("mfa_token=mfa-1&totp=123456&client_time="),
+            "{}",
+            seen[1].body
+        );
+        let session = client.session().unwrap();
+        assert_eq!(session.access_token, "a");
+        assert_eq!(session.user_id, 9);
+        assert_eq!(client.default_monitor_id(), Some(42));
+    }
+
+    #[tokio::test]
+    async fn bad_password_does_not_renew_old_session() {
+        let (url, server) = mock_server(vec![(
+            401,
+            r#"{"status":"error","error_reason":"Bad email or password"}"#,
+        )])
+        .await;
+        let client = client_for(url);
+
+        let err = client.login("me@x.com", "wrong").await.unwrap_err();
+
+        assert!(matches!(err, Error::Api { status: 401, .. }), "{err:?}");
+        let seen = server.await.unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].auth, None, "login must not send the old token");
+    }
+
+    #[tokio::test]
     async fn second_401_is_returned_not_retried() {
         let (url, server) = mock_server(vec![EXPIRED, RENEWED, EXPIRED]).await;
         let client = client_for(url);
