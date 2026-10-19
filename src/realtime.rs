@@ -18,15 +18,12 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::client::PROTOCOL_VERSION;
+use crate::client::{CONNECT_TIMEOUT, PROTOCOL_VERSION};
 use crate::error::{Error, Result};
 use crate::models::ConnectionState;
 
 /// How long the feed may be silent before it's treated as dead.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// How long the websocket handshake may take.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A live connection to a monitor's realtime feed.
 ///

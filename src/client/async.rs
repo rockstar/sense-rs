@@ -5,7 +5,7 @@ use std::time::Duration;
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 
-use super::PROTOCOL_VERSION;
+use super::{CONNECT_TIMEOUT, PROTOCOL_VERSION};
 use crate::error::{Error, Result};
 use crate::models::*;
 use crate::realtime::RealtimeFeed;
@@ -13,7 +13,6 @@ use crate::realtime::RealtimeFeed;
 const DEFAULT_API_URL: &str = "https://api.sense.com/apiservice/api/v1/";
 const DEFAULT_REALTIME_URL: &str = "wss://clientrt.sense.com/";
 const USER_AGENT: &str = concat!("sense-rs/", env!("CARGO_PKG_VERSION"));
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Async client for the Sense API.
