@@ -56,7 +56,9 @@ impl RealtimeFeed {
         let headers = req.headers_mut();
         headers.insert(
             "Authorization",
-            format!("bearer {access_token}").parse().unwrap(),
+            format!("bearer {access_token}").parse().map_err(|_| {
+                Error::InvalidArgument("access token is not a valid header value".into())
+            })?,
         );
         headers.insert("Accept", "application/x-msgpack".parse().unwrap());
         headers.insert("X-Sense-Protocol", PROTOCOL_VERSION.parse().unwrap());
@@ -442,6 +444,15 @@ mod tests {
             waited.is_err(),
             "expected no event and no timeout, got {waited:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn bad_token_is_an_error_not_a_panic() {
+        let err = RealtimeFeed::connect("ws://127.0.0.1:1/", "token\n")
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(err, Error::InvalidArgument(_)), "{err:?}");
     }
 
     #[tokio::test]
