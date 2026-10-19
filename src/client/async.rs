@@ -144,7 +144,11 @@ impl Client {
 
     /// Finish an MFA login with the token from [`Error::MfaRequired`] and a TOTP code.
     pub async fn login_mfa(&self, mfa_token: &str, totp: &str) -> Result<AuthResponse> {
-        let now = iso8601_now();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let now = iso8601(now);
         let form = [
             ("mfa_token", mfa_token),
             ("totp", totp),
@@ -439,12 +443,8 @@ fn api_error(status: StatusCode, body: &[u8]) -> Error {
     }
 }
 
-/// Current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
-fn iso8601_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
+/// A unix timestamp as UTC `YYYY-MM-DDTHH:MM:SSZ`.
+fn iso8601(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Civil-from-days, from Howard Hinnant's date algorithms.
     let z = days + 719_468;
@@ -469,10 +469,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn iso8601_shape() {
-        let s = iso8601_now();
-        assert_eq!(s.len(), 20);
-        assert!(s.starts_with("20") && s.ends_with('Z'));
+    fn iso8601_known_dates() {
+        // Expected values from Python's `datetime`.
+        let cases = [
+            (0, "1970-01-01T00:00:00Z"),
+            (946_684_799, "1999-12-31T23:59:59Z"),
+            (951_782_400, "2000-02-29T00:00:00Z"), // divisible by 400: leap year
+            (951_868_800, "2000-03-01T00:00:00Z"),
+            (-2_203_977_600, "1900-02-28T00:00:00Z"), // century: not a leap year
+            (-2_203_891_200, "1900-03-01T00:00:00Z"),
+            (1_709_164_800, "2024-02-29T00:00:00Z"),
+            (1_234_567_890, "2009-02-13T23:31:30Z"),
+            (1_700_000_000, "2023-11-14T22:13:20Z"),
+            (4_107_542_399, "2100-02-28T23:59:59Z"),
+            (4_107_542_400, "2100-03-01T00:00:00Z"),
+        ];
+        for (secs, expected) in cases {
+            assert_eq!(iso8601(secs), expected, "{secs}");
+        }
     }
 
     #[test]
