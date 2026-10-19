@@ -24,6 +24,9 @@ use crate::models::ConnectionState;
 /// How long the feed may be silent before it's treated as dead.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long the websocket handshake may take.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// A live connection to a monitor's realtime feed.
 ///
 /// Implements [`Stream`]; use [`StreamExt::next`] to read events. The server
@@ -54,7 +57,11 @@ impl RealtimeFeed {
         headers.insert("Accept", "application/x-msgpack".parse().unwrap());
         headers.insert("X-Sense-Protocol", PROTOCOL_VERSION.parse().unwrap());
 
-        let ws = match tokio_tungstenite::connect_async(req).await {
+        let connect = tokio_tungstenite::connect_async(req);
+        let ws = match tokio::time::timeout(CONNECT_TIMEOUT, connect)
+            .await
+            .map_err(|_| Error::Timeout(CONNECT_TIMEOUT))?
+        {
             Ok((ws, _)) => ws,
             Err(tungstenite::Error::Http(resp)) => {
                 return Err(Error::Api {

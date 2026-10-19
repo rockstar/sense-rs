@@ -1,6 +1,6 @@
 use std::fmt::Write;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
@@ -13,6 +13,8 @@ use crate::realtime::RealtimeFeed;
 const DEFAULT_API_URL: &str = "https://api.sense.com/apiservice/api/v1/";
 const DEFAULT_REALTIME_URL: &str = "wss://clientrt.sense.com/";
 const USER_AGENT: &str = concat!("sense-rs/", env!("CARGO_PKG_VERSION"));
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Async client for the Sense API.
 ///
@@ -74,6 +76,8 @@ impl ClientBuilder {
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .default_headers(headers)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
             .build()?;
         Ok(Client {
             inner: Arc::new(Inner {
