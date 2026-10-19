@@ -654,6 +654,21 @@ mod tests {
         );
     }
 
+    /// Plain `#[test]`: the blocking client panics inside a runtime. The
+    /// request timeout needs timers, so this also guards `enable_all()`.
+    #[test]
+    fn blocking_client_makes_requests() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (url, server) = rt.block_on(mock_server(vec![(200, "{}")]));
+        let client = crate::sync::Client::from_async(client_for(url)).unwrap();
+
+        client.monitor_status(1).unwrap();
+
+        let seen = rt.block_on(server).unwrap();
+        assert!(seen[0].line.starts_with("GET /app/monitors/1/status "));
+        assert_eq!(seen[0].auth.as_deref(), Some("bearer old-access"));
+    }
+
     #[tokio::test]
     async fn renews_and_retries_once_on_401() {
         let (url, server) = mock_server(vec![EXPIRED, RENEWED, (200, "{}")]).await;
