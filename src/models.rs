@@ -197,7 +197,6 @@ pub struct Device {
 /// Time range bucket for history endpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scale {
-    Hour,
     Day,
     Week,
     Month,
@@ -209,7 +208,6 @@ pub enum Scale {
 impl fmt::Display for Scale {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Scale::Hour => "HOUR",
             Scale::Day => "DAY",
             Scale::Week => "WEEK",
             Scale::Month => "MONTH",
