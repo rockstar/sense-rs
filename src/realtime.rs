@@ -457,17 +457,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn data_is_delivered() {
+    async fn data_is_delivered_then_server_close_ends_feed() {
         let url = ws_server(|mut ws| async move {
             ws.send(Message::Binary(frame("hello", map(vec![])).into()))
                 .await
                 .unwrap();
-            while ws.next().await.is_some() {}
+            ws.close(None).await.unwrap();
         })
         .await;
         let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
         let ev = feed.next().await.unwrap().unwrap();
         assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
+        assert!(
+            feed.next().await.is_none(),
+            "feed should end on server close"
+        );
     }
 
     #[test]
