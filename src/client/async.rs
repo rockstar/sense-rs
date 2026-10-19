@@ -701,6 +701,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn realtime_renews_and_reconnects_on_401_handshake() {
+        use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+
+        let (api_url, api) = mock_server(vec![RENEWED]).await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ws_url = format!("ws://{}/", listener.local_addr().unwrap());
+        let ws = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let first = read_request(&mut sock).await.auth;
+            write_response(&mut sock, EXPIRED).await;
+
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut second = None;
+            let _ws = tokio_tungstenite::accept_hdr_async(sock, |req: &Request, resp: Response| {
+                second = req
+                    .headers()
+                    .get("authorization")
+                    .map(|v| v.to_str().unwrap().to_string());
+                Ok(resp)
+            })
+            .await
+            .unwrap();
+            (first, second)
+        });
+        let client = Client::builder()
+            .api_url(api_url)
+            .realtime_url(ws_url)
+            .session(Session {
+                access_token: "old-access".into(),
+                refresh_token: "old-refresh".into(),
+                user_id: 7,
+                monitor_ids: vec![1],
+            })
+            .build()
+            .unwrap();
+
+        client.realtime(1).await.unwrap();
+
+        let (first, second) = ws.await.unwrap();
+        assert_eq!(first.as_deref(), Some("bearer old-access"));
+        assert_eq!(second.as_deref(), Some("bearer new-access"));
+        let seen = api.await.unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].line.starts_with("POST /renew "));
+    }
+
+    #[tokio::test]
     async fn second_401_is_returned_not_retried() {
         let (url, server) = mock_server(vec![EXPIRED, RENEWED, EXPIRED]).await;
         let client = client_for(url);
