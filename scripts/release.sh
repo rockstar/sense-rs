@@ -64,6 +64,10 @@ else
     exit 1
   fi
 
+  # Undo the bump on any failure (including Ctrl-C) until it is committed.
+  # HEAD is named so this also unstages the files if `git commit` fails.
+  trap 'git checkout -q HEAD -- Cargo.toml Cargo.lock' EXIT
+
   case "${bump:-patch}" in
     major | minor | patch) cargo set-version --bump "${bump:-patch}" ;;
     *) cargo set-version "$bump" ;;
@@ -72,25 +76,25 @@ else
 
   if tag_exists "$version"; then
     echo "error: tag $version already exists" >&2
-    git checkout -- Cargo.toml Cargo.lock
     exit 1
   fi
 
-  if ! confirm "Release $version?"; then
-    git checkout -- Cargo.toml Cargo.lock
-    exit 1
-  fi
+  confirm "Release $version?" || exit 1
 
   # Refresh Cargo.lock and make sure everything still builds.
-  if ! cargo check --all-targets --quiet; then
-    git checkout -- Cargo.toml Cargo.lock
-    exit 1
-  fi
+  cargo check --all-targets --quiet
 
   git add Cargo.toml Cargo.lock
   git commit -m "chore: release $version"
+  trap - EXIT
+
   git tag -a "$version" -m "$version"
-  git push --atomic origin main "$version"
+  if ! git push --atomic origin main "$version"; then
+    echo "error: push failed; removing the local release commit and tag" >&2
+    git tag -d "$version"
+    git reset -q --keep HEAD~1
+    exit 1
+  fi
 fi
 
 echo "Pushed $version; the release workflow will publish it to crates.io."
