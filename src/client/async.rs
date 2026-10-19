@@ -451,4 +451,120 @@ mod tests {
             Error::Api { status: 401, reason: Some(r) } if r == "Bad email or password"
         ));
     }
+
+    /// One request as the mock server saw it.
+    #[derive(Debug)]
+    struct Seen {
+        line: String,
+        auth: Option<String>,
+        body: String,
+    }
+
+    /// Serves `replies` in order, one per connection, and returns what it saw.
+    async fn mock_server(
+        replies: Vec<(u16, &'static str)>,
+    ) -> (String, tokio::task::JoinHandle<Vec<Seen>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            for (status, body) in replies {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let header_end = loop {
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break i + 4;
+                    }
+                };
+                let head = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+                let header = |name: &str| {
+                    head.lines().find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.eq_ignore_ascii_case(name).then(|| v.trim().to_string())
+                    })
+                };
+                let len: usize = header("content-length").map_or(0, |v| v.parse().unwrap());
+                while buf.len() < header_end + len {
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                seen.push(Seen {
+                    line: head.lines().next().unwrap().to_string(),
+                    auth: header("authorization"),
+                    body: String::from_utf8_lossy(&buf[header_end..]).into_owned(),
+                });
+                let resp = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                sock.write_all(resp.as_bytes()).await.unwrap();
+            }
+            seen
+        });
+        (url, handle)
+    }
+
+    fn client_for(url: String) -> Client {
+        Client::builder()
+            .api_url(url)
+            .session(Session {
+                access_token: "old-access".into(),
+                refresh_token: "old-refresh".into(),
+                user_id: 7,
+                monitor_ids: vec![1],
+            })
+            .build()
+            .unwrap()
+    }
+
+    const EXPIRED: (u16, &str) = (401, r#"{"status":"error","error_reason":"expired"}"#);
+    const RENEWED: (u16, &str) = (
+        200,
+        r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
+    );
+
+    #[tokio::test]
+    async fn renews_and_retries_once_on_401() {
+        let (url, server) = mock_server(vec![EXPIRED, RENEWED, (200, "{}")]).await;
+        let client = client_for(url);
+
+        client.monitor_status(1).await.unwrap();
+
+        let seen = server.await.unwrap();
+        assert_eq!(seen.len(), 3);
+        assert!(seen[0].line.starts_with("GET /app/monitors/1/status "));
+        assert_eq!(seen[0].auth.as_deref(), Some("bearer old-access"));
+
+        assert!(seen[1].line.starts_with("POST /renew "));
+        assert_eq!(seen[1].auth, None, "renew must not send the expired token");
+        assert!(
+            seen[1].body.contains("refresh_token=old-refresh"),
+            "{}",
+            seen[1].body
+        );
+        assert!(seen[1].body.contains("user_id=7"), "{}", seen[1].body);
+
+        assert!(seen[2].line.starts_with("GET /app/monitors/1/status "));
+        assert_eq!(seen[2].auth.as_deref(), Some("bearer new-access"));
+
+        let session = client.session().unwrap();
+        assert_eq!(session.access_token, "new-access");
+        assert_eq!(session.refresh_token, "new-refresh");
+    }
+
+    #[tokio::test]
+    async fn second_401_is_returned_not_retried() {
+        let (url, server) = mock_server(vec![EXPIRED, RENEWED, EXPIRED]).await;
+        let client = client_for(url);
+
+        let err = client.monitor_status(1).await.unwrap_err();
+
+        assert!(matches!(err, Error::Api { status: 401, .. }), "{err:?}");
+        assert_eq!(server.await.unwrap().len(), 3);
+    }
 }
