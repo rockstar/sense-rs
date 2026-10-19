@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Unofficial async and blocking client for the Sense energy monitor API"
 license = "MIT"
+repository = "https://github.com/rockstar/sense-rs"
+readme = "README.md"
+include = ["src/**", "examples/**", "README.md", "LICENSE"]
 keywords = ["sense", "energy", "home-automation", "power"]
 categories = ["api-bindings"]
 
