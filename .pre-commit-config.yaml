@@ -9,13 +9,6 @@ repos:
         types: [rust]
         pass_filenames: false
 
-      - id: cargo-build
-        name: cargo build (deny warnings)
-        entry: env RUSTFLAGS=-Dwarnings cargo build --all-targets
-        language: system
-        types_or: [rust, toml]
-        pass_filenames: false
-
       - id: cargo-clippy
         name: cargo clippy (deny warnings)
         entry: cargo clippy --all-targets -- -D warnings
