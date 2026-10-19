@@ -36,6 +36,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// ping. If nothing arrives for the whole timeout (30 s by default), the
 /// connection is presumed dead: the stream yields [`Error::Timeout`] and
 /// then ends. Reconnect with [`Client::realtime`](crate::Client::realtime).
+///
+/// If the server rejects the token mid-feed, the stream yields
+/// [`Error::Api`] with status 401. Call [`Client::renew`](crate::Client::renew)
+/// before reconnecting, or the new feed will be rejected too.
 pub struct RealtimeFeed {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     idle_timeout: Duration,
@@ -299,6 +303,7 @@ pub struct Delta {
 
 #[derive(Deserialize)]
 struct ErrorPayload {
+    authorized: Option<bool>,
     error_reason: Option<String>,
 }
 
@@ -346,6 +351,13 @@ fn decode_frame(bytes: &[u8]) -> Result<RealtimeEvent> {
         "monitor_info" => RealtimeMessage::MonitorInfo(from_msgpack(payload)?),
         "error" => {
             let e: ErrorPayload = from_msgpack(payload)?;
+            // An expired token may show up here rather than as a 401 on the handshake.
+            if e.authorized == Some(false) {
+                return Err(Error::Api {
+                    status: 401,
+                    reason: e.error_reason,
+                });
+            }
             return Err(Error::Realtime(
                 e.error_reason.unwrap_or_else(|| "unknown".into()),
             ));
@@ -523,12 +535,22 @@ mod tests {
 
     #[test]
     fn error_message_is_err() {
+        let payload = map(vec![("error_reason", Value::from("Overloaded"))]);
+        let err = decode_frame(&frame("error", payload)).unwrap_err();
+        assert!(matches!(err, Error::Realtime(r) if r == "Overloaded"));
+    }
+
+    #[test]
+    fn unauthorized_error_message_is_401() {
         let payload = map(vec![
             ("authorized", Value::from(false)),
             ("error_reason", Value::from("Unauthorized")),
         ]);
         let err = decode_frame(&frame("error", payload)).unwrap_err();
-        assert!(matches!(err, Error::Realtime(r) if r == "Unauthorized"));
+        assert!(matches!(
+            err,
+            Error::Api { status: 401, reason: Some(r) } if r == "Unauthorized"
+        ));
     }
 
     #[test]

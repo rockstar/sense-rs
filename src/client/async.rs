@@ -301,6 +301,10 @@ impl Client {
     // ---- realtime ------------------------------------------------------
 
     /// Open the realtime websocket feed for a monitor.
+    ///
+    /// A 401 on the handshake renews the token and retries once. A 401 from
+    /// the open feed ([`Error::Api`] with status 401) does not; call
+    /// [`renew`](Self::renew) before reconnecting.
     pub async fn realtime(&self, monitor_id: i64) -> Result<RealtimeFeed> {
         let url = format!(
             "{}monitors/{monitor_id}/realtimefeed",

@@ -131,6 +131,9 @@ impl Client {
 
     /// Open the realtime feed. Iterate it to receive events; each call to
     /// `next` blocks until one arrives.
+    ///
+    /// If the feed yields [`Error::Api`] with status 401, call
+    /// [`renew`](Self::renew) before reconnecting.
     pub fn realtime(&self, monitor_id: i64) -> Result<RealtimeFeed> {
         let inner = self.block(self.inner.realtime(monitor_id))?;
         Ok(RealtimeFeed {
