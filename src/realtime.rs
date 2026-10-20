@@ -192,9 +192,11 @@ impl Stream for RealtimeFeed {
 pub struct RealtimeEvent {
     /// Unix timestamp (seconds) the server attached to the message.
     pub epoch: i64,
+    /// The decoded message.
     pub message: RealtimeMessage,
 }
 
+/// The body of a [`RealtimeEvent`].
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum RealtimeMessage {
@@ -210,28 +212,41 @@ pub enum RealtimeMessage {
     /// `device_states`, `recent_history`, `new_timeline_event`,
     /// `monitor_connection`, `solar_setup_status` and `new_relay_event`.
     Other {
+        /// The message type, e.g. `device_states`.
         kind: String,
+        /// The message body, as JSON.
         payload: serde_json::Value,
     },
 }
 
+/// Payload of [`RealtimeMessage::Hello`].
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Hello {
+    /// Whether the monitor is online.
     pub online: Option<bool>,
+    /// The monitor's connection state.
     pub connection_state: Option<ConnectionState>,
 }
 
+/// Payload of [`RealtimeMessage::MonitorInfo`].
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MonitorInfo {
+    /// Enabled features. Meaning not confirmed; the API is undocumented.
     pub features: Option<String>,
 }
 
+/// Payload of [`RealtimeMessage::DataChange`].
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DataChange {
+    /// New checksum of the monitor overview. Refetch it if this differs from yours.
     pub monitor_overview_checksum: Option<String>,
+    /// New checksum of the device list. Refetch it if this differs from yours.
     pub device_data_checksum: Option<String>,
+    /// Increments when monitor settings change.
     pub settings_version: Option<i64>,
+    /// Increments when user settings change.
     pub user_version: Option<i64>,
+    /// Events waiting to be read, as raw JSON.
     pub pending_events: Option<serde_json::Value>,
 }
 
@@ -242,8 +257,11 @@ pub struct RealtimeUpdate {
     pub w: f64,
     /// Consumption cost rate.
     pub c: Option<f64>,
+    /// Solar production.
     pub solar_w: Option<f64>,
+    /// Solar production value rate.
     pub solar_c: Option<f64>,
+    /// Net power from the grid. Negative when exporting.
     pub grid_w: Option<f64>,
     /// Line frequency.
     pub hz: Option<f64>,
@@ -262,43 +280,69 @@ pub struct RealtimeUpdate {
     /// Devices currently drawing power.
     #[serde(default)]
     pub devices: Vec<RealtimeDevice>,
+    /// Recent changes in power draw.
     #[serde(default)]
     pub deltas: Vec<Delta>,
+    /// Smoothed total consumption. Meaning not confirmed; the API is undocumented.
     pub d_w: Option<f64>,
+    /// Smoothed solar production. Meaning not confirmed; the API is undocumented.
     pub d_solar_w: Option<f64>,
+    /// Smoothed battery power. Meaning not confirmed; the API is undocumented.
     pub d_battery_w: Option<f64>,
+    /// Smoothed generator power. Meaning not confirmed; the API is undocumented.
     pub d_generator_w: Option<f64>,
+    /// Share of consumption covered by solar, as a percentage. Meaning not confirmed; the API is undocumented.
     pub solar_pct: Option<i64>,
+    /// Share of consumption covered by battery, as a percentage. Meaning not confirmed; the API is undocumented.
     pub battery_pct: Option<i64>,
+    /// Share of consumption covered by generator, as a percentage. Meaning not confirmed; the API is undocumented.
     pub generator_pct: Option<i64>,
+    /// Backup power status. Meaning not confirmed; the API is undocumented.
     pub backup_power: Option<String>,
+    /// Generator state, as raw JSON.
     pub gen_state: Option<serde_json::Value>,
+    /// When the generator state last changed.
     pub gen_last_state_time: Option<String>,
+    /// Auxiliary port readings, as raw JSON.
     pub aux: Option<serde_json::Value>,
+    /// Time-of-use rate alert, as raw JSON.
     pub tou_alert: Option<serde_json::Value>,
+    /// Power flow between grid, solar, battery and home, as raw JSON.
     pub power_flow: Option<serde_json::Value>,
 }
 
+/// A device in [`RealtimeUpdate::devices`].
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RealtimeDevice {
+    /// Device ID.
     pub id: String,
+    /// Display name.
     pub name: Option<String>,
+    /// Icon name.
     pub icon: Option<String>,
+    /// Current power draw.
     pub w: Option<f64>,
+    /// Current cost rate.
     pub c: Option<f64>,
     /// Always-on watts.
     pub ao_w: Option<f64>,
     /// State details (dimmer intensity, battery charge, ...).
     pub sd: Option<serde_json::Value>,
+    /// Device attributes. Meaning not confirmed; the API is undocumented.
     #[serde(default)]
     pub attrs: Vec<String>,
 }
 
+/// A change in power draw, in [`RealtimeUpdate::deltas`].
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Delta {
+    /// Device that changed, if known.
     pub device_id: Option<String>,
+    /// Size of the change.
     pub w: Option<f64>,
+    /// Leg the change happened on.
     pub channel: Option<i64>,
+    /// Frame the change happened in. Meaning not confirmed; the API is undocumented.
     pub frame: Option<i64>,
 }
 

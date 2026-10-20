@@ -5,7 +5,10 @@
 pub enum Error {
     /// Login succeeded but needs a TOTP code. Pass `mfa_token` to `login_mfa`.
     #[error("multi-factor authentication required")]
-    MfaRequired { mfa_token: String },
+    MfaRequired {
+        /// Short-lived token that identifies this login attempt.
+        mfa_token: String,
+    },
 
     /// The client has no session. Call `login` or `set_session` first.
     #[error("not authenticated")]
@@ -17,7 +20,12 @@ pub enum Error {
 
     /// The API returned a non-success status.
     #[error("sense api error ({status}): {}", reason.as_deref().unwrap_or("no reason given"))]
-    Api { status: u16, reason: Option<String> },
+    Api {
+        /// HTTP status code. The realtime feed reports a rejected token as 401.
+        status: u16,
+        /// The API's explanation, if it gave one.
+        reason: Option<String>,
+    },
 
     /// The realtime feed received nothing, not even a pong, for this long,
     /// or the handshake took too long. Open a new feed.
@@ -28,6 +36,7 @@ pub enum Error {
     #[error("realtime feed error: {0}")]
     Realtime(String),
 
+    /// The HTTP request failed: connection, TLS, or timeout.
     #[error(transparent)]
     Http(#[from] reqwest::Error),
 
@@ -35,9 +44,11 @@ pub enum Error {
     #[error("failed to start runtime: {0}")]
     Runtime(#[source] std::io::Error),
 
+    /// The realtime websocket failed.
     #[error(transparent)]
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
 
+    /// A response or feed message didn't match the expected shape.
     #[error("failed to decode response: {0}")]
     Decode(String),
 }
@@ -72,6 +83,7 @@ impl From<tokio_tungstenite::tungstenite::Error> for Error {
     }
 }
 
+/// Shorthand for results with this crate's [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(test)]

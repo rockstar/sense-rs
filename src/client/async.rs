@@ -69,6 +69,7 @@ impl ClientBuilder {
         self
     }
 
+    /// Build the client. Fails only if the HTTP client can't be created.
     pub fn build(self) -> Result<Client> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -118,6 +119,7 @@ impl Client {
             .expect("default client configuration is valid")
     }
 
+    /// A builder for a client with custom settings.
     pub fn builder() -> ClientBuilder {
         ClientBuilder::default()
     }
@@ -136,6 +138,8 @@ impl Client {
             .clone()
     }
 
+    /// Replace the current session, e.g. with one saved from
+    /// [`session`](Self::session). `None` forgets it without logging out.
     pub fn set_session(&self, session: Option<Session>) {
         *self
             .inner
@@ -246,11 +250,13 @@ impl Client {
 
     // ---- monitors ------------------------------------------------------
 
+    /// Overview of a monitor: settings, solar config, and device counts.
     pub async fn monitor_overview(&self, monitor_id: i64) -> Result<MonitorOverviewResponse> {
         self.get(&format!("app/monitors/{monitor_id}/overview"), &[])
             .await
     }
 
+    /// Connectivity and signal status of a monitor.
     pub async fn monitor_status(&self, monitor_id: i64) -> Result<MonitorStatus> {
         self.get(&format!("app/monitors/{monitor_id}/status"), &[])
             .await
@@ -258,6 +264,7 @@ impl Client {
 
     // ---- devices -------------------------------------------------------
 
+    /// All devices detected on a monitor.
     pub async fn devices(&self, monitor_id: i64) -> Result<DevicesOverview> {
         self.get(&format!("app/monitors/{monitor_id}/devices/overview"), &[])
             .await

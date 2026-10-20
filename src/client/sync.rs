@@ -62,14 +62,17 @@ impl Client {
         self.rt.block_on(f)
     }
 
+    /// See [`crate::Client::session`].
     pub fn session(&self) -> Option<Session> {
         self.inner.session()
     }
 
+    /// See [`crate::Client::set_session`].
     pub fn set_session(&self, session: Option<Session>) {
         self.inner.set_session(session)
     }
 
+    /// See [`crate::Client::default_monitor_id`].
     pub fn default_monitor_id(&self) -> Option<i64> {
         self.inner.default_monitor_id()
     }
@@ -79,38 +82,47 @@ impl Client {
         self.block(self.inner.login(email, password))
     }
 
+    /// See [`crate::Client::login_mfa`].
     pub fn login_mfa(&self, mfa_token: &str, totp: &str) -> Result<AuthResponse> {
         self.block(self.inner.login_mfa(mfa_token, totp))
     }
 
+    /// See [`crate::Client::renew`].
     pub fn renew(&self) -> Result<()> {
         self.block(self.inner.renew())
     }
 
+    /// See [`crate::Client::logout`].
     pub fn logout(&self) -> Result<()> {
         self.block(self.inner.logout())
     }
 
+    /// See [`crate::Client::monitor_overview`].
     pub fn monitor_overview(&self, monitor_id: i64) -> Result<MonitorOverviewResponse> {
         self.block(self.inner.monitor_overview(monitor_id))
     }
 
+    /// See [`crate::Client::monitor_status`].
     pub fn monitor_status(&self, monitor_id: i64) -> Result<MonitorStatus> {
         self.block(self.inner.monitor_status(monitor_id))
     }
 
+    /// See [`crate::Client::devices`].
     pub fn devices(&self, monitor_id: i64) -> Result<DevicesOverview> {
         self.block(self.inner.devices(monitor_id))
     }
 
+    /// See [`crate::Client::device`].
     pub fn device(&self, monitor_id: i64, device_id: &str) -> Result<serde_json::Value> {
         self.block(self.inner.device(monitor_id, device_id))
     }
 
+    /// See [`crate::Client::trends`].
     pub fn trends(&self, monitor_id: i64, scale: Scale, start: Option<&str>) -> Result<Trends> {
         self.block(self.inner.trends(monitor_id, scale, start))
     }
 
+    /// See [`crate::Client::usage`].
     pub fn usage(
         &self,
         monitor_id: i64,
@@ -121,10 +133,12 @@ impl Client {
         self.block(self.inner.usage(monitor_id, granularity, start, frames))
     }
 
+    /// See [`crate::Client::cumulative`].
     pub fn cumulative(&self, monitor_id: i64) -> Result<CumulativeUsage> {
         self.block(self.inner.cumulative(monitor_id))
     }
 
+    /// See [`crate::Client::get_json`].
     pub fn get_json(&self, path: &str, query: &[(&str, String)]) -> Result<serde_json::Value> {
         self.block(self.inner.get_json(path, query))
     }
@@ -160,6 +174,7 @@ impl RealtimeFeed {
         self.rt.block_on(self.inner.start_updates())
     }
 
+    /// See [`crate::realtime::RealtimeFeed::close`].
     pub fn close(self) -> Result<()> {
         self.rt.block_on(self.inner.close())
     }

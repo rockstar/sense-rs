@@ -30,3 +30,6 @@ tokio = { version = "1.53.3", features = ["macros", "io-util"] }
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+[lints.rust]
+missing_docs = "deny"
