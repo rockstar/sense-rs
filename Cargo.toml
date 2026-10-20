@@ -1,6 +1,6 @@
 [package]
 name = "sense-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Unofficial async and blocking client for the Sense energy monitor API"
 license = "MIT"
