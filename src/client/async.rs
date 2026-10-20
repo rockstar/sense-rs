@@ -463,7 +463,7 @@ fn path_segment(s: &str) -> Result<String> {
     Ok(out)
 }
 
-fn api_error(status: StatusCode, body: &[u8]) -> Error {
+pub(crate) fn api_error(status: StatusCode, body: &[u8]) -> Error {
     let parsed: Option<ApiErrorBody> = serde_json::from_slice(body).ok();
     if let Some(mfa_token) = parsed.as_ref().and_then(|b| b.mfa_token.clone()) {
         return Error::MfaRequired { mfa_token };

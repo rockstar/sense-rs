@@ -4,6 +4,7 @@
 mod r#async;
 pub mod sync;
 
+pub(crate) use r#async::api_error;
 pub use r#async::{Client, ClientBuilder};
 
 /// Sent as the `X-Sense-Protocol` header.

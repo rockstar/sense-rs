@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::client::{CONNECT_TIMEOUT, PROTOCOL_VERSION};
+use crate::client::{CONNECT_TIMEOUT, PROTOCOL_VERSION, api_error};
 use crate::error::{Error, Result};
 use crate::models::ConnectionState;
 
@@ -71,13 +71,10 @@ impl RealtimeFeed {
         {
             Ok((ws, _)) => ws,
             Err(tungstenite::Error::Http(resp)) => {
-                return Err(Error::Api {
-                    status: resp.status().as_u16(),
-                    reason: resp
-                        .body()
-                        .as_ref()
-                        .map(|b| String::from_utf8_lossy(b).into_owned()),
-                });
+                return Err(api_error(
+                    resp.status(),
+                    resp.body().as_deref().unwrap_or_default(),
+                ));
             }
             Err(e) => return Err(e.into()),
         };
