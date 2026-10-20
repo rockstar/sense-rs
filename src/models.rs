@@ -8,7 +8,16 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Reads `null` as the default, for fields the API sends as either.
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::deserialize(d)?.unwrap_or_default())
+}
 
 /// Returned by `POST /authenticate` and `POST /authenticate/mfa`.
 ///
@@ -373,7 +382,7 @@ pub struct Trends {
     /// Carbon intensity data, as raw JSON.
     pub carbon_intensity: Option<serde_json::Value>,
     /// Devices whose usage changed most from the previous period.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub top_movers: Vec<Device>,
 }
 
@@ -479,7 +488,8 @@ mod tests {
                     "total_costs": [10.25, null],
                     "devices": [{"id": "x", "total_cost": 1.5, "cost_history": [0.5, null]}]
                 },
-                "grid_to_battery": {"total_kwh": 1.0, "cost": 2.5}
+                "grid_to_battery": {"total_kwh": 1.0, "cost": 2.5},
+                "top_movers": null
             }"#,
         )
         .unwrap();
@@ -489,5 +499,6 @@ mod tests {
         assert_eq!(consumption.total_costs, vec![Some(10.25), None]);
         assert_eq!(consumption.devices[0].cost_history, vec![Some(0.5), None]);
         assert_eq!(consumption.devices[0].name, None);
+        assert!(trends.top_movers.is_empty());
     }
 }

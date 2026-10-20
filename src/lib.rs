@@ -37,14 +37,35 @@
 //! tokens are renewed automatically. A renewal replaces both the access and
 //! refresh tokens, so save the session again before exiting.
 //!
-//! Response types are in [`models`]; live-feed types are in [`realtime`].
+//! Response types are in [`models`]; live-feed types are in `realtime`.
+//!
+//! # Features
+//!
+//! Enable exactly one:
+//!
+//! - `native` (default): HTTP via reqwest on Tokio. Includes the realtime
+//!   feed (`realtime`, [`Client::realtime`]) and the blocking client (`sync`).
+//! - `wasi`: HTTP via [wasi-http](https://github.com/WebAssembly/wasi-http)
+//!   for `wasm32-wasip2` components, using `wstd`. REST endpoints only: no
+//!   realtime feed (wasi has no TLS sockets for `wss://` yet) and no
+//!   blocking client. Request timeouts are left to the host.
 
 #![warn(unnameable_types, unreachable_pub)]
+
+#[cfg(all(feature = "native", feature = "wasi"))]
+compile_error!(
+    "features `native` and `wasi` are mutually exclusive; use `default-features = false, features = [\"wasi\"]`"
+);
+#[cfg(not(any(feature = "native", feature = "wasi")))]
+compile_error!("enable exactly one of the `native` (default) or `wasi` features");
 
 mod client;
 mod error;
 pub mod models;
+#[cfg(feature = "native")]
 pub mod realtime;
 
-pub use client::{Client, ClientBuilder, sync};
+#[cfg(feature = "native")]
+pub use client::sync;
+pub use client::{Client, ClientBuilder};
 pub use error::{Error, Result};

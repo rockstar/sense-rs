@@ -16,23 +16,30 @@ repos:
         types_or: [rust, toml]
         pass_filenames: false
 
+      - id: cargo-clippy-wasi
+        name: cargo clippy wasi (deny warnings)
+        entry: cargo clippy --all-targets --target wasm32-wasip2 --no-default-features --features wasi -- -D warnings
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false
+
       - id: cargo-test
         name: cargo test
-        entry: cargo test --all-targets --all-features
+        entry: cargo test --all-targets
         language: system
         types_or: [rust, toml]
         pass_filenames: false
 
       - id: cargo-test-doc
-        name: cargo test --doc --all-features
-        entry: cargo test --doc --all-features
+        name: cargo test --doc
+        entry: cargo test --doc
         language: system
         types_or: [rust, toml]
         pass_filenames: false
 
       - id: cargo-semver-checks
         name: cargo semver-checks
-        entry: cargo semver-checks
+        entry: cargo semver-checks --default-features
         language: system
         types_or: [rust, toml]
         pass_filenames: false

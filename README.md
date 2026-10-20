@@ -38,6 +38,19 @@ client.login("me@example.com", "password")?;
 for event in client.realtime(client.default_monitor_id().unwrap())? { /* ... */ }
 ```
 
+## WASI
+
+For `wasm32-wasip2` components, swap the default `native` feature for `wasi`, which sends
+requests through [wasi-http](https://github.com/WebAssembly/wasi-http) using `wstd`:
+
+```toml
+sense-rs = { version = "0.1", default-features = false, features = ["wasi"] }
+```
+
+The two features are mutually exclusive. `wasi` covers the REST endpoints only: there's no
+realtime feed (wasi has no TLS sockets for `wss://` yet) and no `sense::sync`. Timeouts are left
+to the host. See `examples/wasi.rs`.
+
 ## What's covered
 
 - Auth: `login`, `login_mfa`, `renew`, `logout`. Expired tokens renew automatically on a 401.

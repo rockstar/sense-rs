@@ -37,14 +37,23 @@ pub enum Error {
     Realtime(String),
 
     /// The HTTP request failed: connection, TLS, or timeout.
+    #[cfg(feature = "native")]
     #[error(transparent)]
     Http(#[from] reqwest::Error),
 
+    /// The HTTP request failed: the wasi-http host rejected or couldn't
+    /// complete it.
+    #[cfg(feature = "wasi")]
+    #[error(transparent)]
+    Http(wstd::http::Error),
+
     /// The blocking client couldn't start its Tokio runtime.
+    #[cfg(feature = "native")]
     #[error("failed to start runtime: {0}")]
     Runtime(#[source] std::io::Error),
 
     /// The realtime websocket failed.
+    #[cfg(feature = "native")]
     #[error(transparent)]
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
 
@@ -70,13 +79,16 @@ impl std::fmt::Debug for Error {
             Error::Timeout(d) => f.debug_tuple("Timeout").field(d).finish(),
             Error::Realtime(s) => f.debug_tuple("Realtime").field(s).finish(),
             Error::Http(e) => f.debug_tuple("Http").field(e).finish(),
+            #[cfg(feature = "native")]
             Error::Runtime(e) => f.debug_tuple("Runtime").field(e).finish(),
+            #[cfg(feature = "native")]
             Error::WebSocket(e) => f.debug_tuple("WebSocket").field(e).finish(),
             Error::Decode(s) => f.debug_tuple("Decode").field(s).finish(),
         }
     }
 }
 
+#[cfg(feature = "native")]
 impl From<tokio_tungstenite::tungstenite::Error> for Error {
     fn from(e: tokio_tungstenite::tungstenite::Error) -> Self {
         Error::WebSocket(Box::new(e))

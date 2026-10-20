@@ -1,19 +1,17 @@
 use std::fmt::Write;
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::Duration;
 
-use reqwest::{Method, StatusCode};
+use http::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 
-use super::{CONNECT_TIMEOUT, PROTOCOL_VERSION};
+use super::http::Http;
 use crate::error::{Error, Result};
 use crate::models::*;
+#[cfg(feature = "native")]
 use crate::realtime::RealtimeFeed;
 
 const DEFAULT_API_URL: &str = "https://api.sense.com/apiservice/api/v1/";
 const DEFAULT_REALTIME_URL: &str = "wss://clientrt.sense.com/";
-const USER_AGENT: &str = concat!("sense-rs/", env!("CARGO_PKG_VERSION"));
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Async client for the Sense API.
 ///
@@ -24,8 +22,9 @@ pub struct Client {
 }
 
 struct Inner {
-    http: reqwest::Client,
+    http: Http,
     api_url: String,
+    #[cfg_attr(not(feature = "native"), allow(dead_code))]
     realtime_url: String,
     session: RwLock<Option<Session>>,
     /// Held while renewing, so concurrent 401s trigger only one `/renew`.
@@ -71,20 +70,9 @@ impl ClientBuilder {
 
     /// Build the client. Fails only if the HTTP client can't be created.
     pub fn build(self) -> Result<Client> {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "X-Sense-Protocol",
-            reqwest::header::HeaderValue::from_static(PROTOCOL_VERSION),
-        );
-        let http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .default_headers(headers)
-            .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
-            .build()?;
         Ok(Client {
             inner: Arc::new(Inner {
-                http,
+                http: Http::new()?,
                 api_url: self.api_url,
                 realtime_url: self.realtime_url,
                 session: RwLock::new(self.session),
@@ -291,13 +279,13 @@ impl Client {
         scale: Scale,
         start: Option<&str>,
     ) -> Result<Trends> {
-        let mut query = vec![
+        // The API rejects requests without `start`; now is in the current period.
+        let start = start.map_or_else(|| jiff::Timestamp::now().to_string(), str::to_string);
+        let query = [
             ("monitor_id", monitor_id.to_string()),
             ("scale", scale.to_string()),
+            ("start", start),
         ];
-        if let Some(start) = start {
-            query.push(("start", start.to_string()));
-        }
         self.get("app/history/trends", &query).await
     }
 
@@ -329,11 +317,13 @@ impl Client {
 
     // ---- realtime ------------------------------------------------------
 
-    /// Open the realtime websocket feed for a monitor.
+    /// Open the realtime websocket feed for a monitor. Requires the `native`
+    /// feature.
     ///
     /// A 401 on the handshake renews the token and retries once. A 401 from
     /// the open feed ([`Error::Api`] with status 401) does not; call
     /// [`renew`](Self::renew) before reconnecting.
+    #[cfg(feature = "native")]
     pub async fn realtime(&self, monitor_id: i64) -> Result<RealtimeFeed> {
         let url = format!(
             "{}monitors/{monitor_id}/realtimefeed",
@@ -432,20 +422,11 @@ impl Client {
         form: Option<&[(&str, &str)]>,
         access_token: Option<&str>,
     ) -> Result<(StatusCode, Vec<u8>)> {
-        let mut req = self
-            .inner
+        let url = format!("{}{path}", self.inner.api_url);
+        self.inner
             .http
-            .request(method, format!("{}{path}", self.inner.api_url))
-            .query(query);
-        if let Some(token) = access_token {
-            req = req.header("Authorization", format!("bearer {token}"));
-        }
-        if let Some(form) = form {
-            req = req.form(form);
-        }
-        let resp = req.send().await?;
-        let status = resp.status();
-        Ok((status, resp.bytes().await?.to_vec()))
+            .request(method, &url, query, form, access_token)
+            .await
     }
 }
 
@@ -482,6 +463,7 @@ pub(crate) fn api_error(status: StatusCode, body: &[u8]) -> Error {
 }
 
 #[cfg(test)]
+#[cfg(feature = "native")]
 mod tests {
     use super::*;
 
