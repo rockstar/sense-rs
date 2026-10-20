@@ -19,7 +19,7 @@ pub struct AuthResponse {
     pub authorized: bool,
     #[serde(default)]
     pub account_id: i64,
-    #[serde(default)]
+    /// Required: renewing tokens sends it back, so a silent 0 would break renewal later.
     pub user_id: i64,
     pub access_token: String,
     pub refresh_token: String,
