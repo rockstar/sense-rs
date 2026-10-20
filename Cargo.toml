@@ -13,6 +13,10 @@ categories = ["api-bindings"]
 [lib]
 name = "sense"
 
+[package.metadata.docs.rs]
+# Labels feature-gated items with the feature they need (nightly `doc_cfg`).
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = ["native"]
 ## reqwest for HTTP, plus the realtime feed and the blocking client. Conflicts with `wasi`.

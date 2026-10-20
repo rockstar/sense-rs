@@ -50,6 +50,7 @@
 //!   realtime feed (wasi has no TLS sockets for `wss://` yet) and no
 //!   blocking client. Request timeouts are left to the host.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(unnameable_types, unreachable_pub)]
 
 #[cfg(all(feature = "native", feature = "wasi"))]
