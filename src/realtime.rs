@@ -136,6 +136,9 @@ impl Stream for RealtimeFeed {
         if self.done {
             return Poll::Ready(None);
         }
+        // Finish sending a ping that couldn't flush last time; read() won't.
+        // Errors here also surface from the read below.
+        let _ = self.ws.poll_flush_unpin(cx);
         loop {
             let msg = match self.ws.poll_next_unpin(cx) {
                 Poll::Pending => break,
@@ -173,7 +176,6 @@ impl Stream for RealtimeFeed {
             if let Err(e) = self.ws.start_send_unpin(Message::Ping(Default::default())) {
                 return Poll::Ready(Some(Err(e.into())));
             }
-            // Later reads flush the ping if this can't finish now.
             if let Poll::Ready(Err(e)) = self.ws.poll_flush_unpin(cx) {
                 return Poll::Ready(Some(Err(e.into())));
             }
