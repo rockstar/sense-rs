@@ -438,7 +438,7 @@ pub struct CumulativeUsage {
 }
 
 /// Error body returned by the API on failure.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct ApiErrorBody {
     pub status: Option<String>,
     pub error_reason: Option<String>,
