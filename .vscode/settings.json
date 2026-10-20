@@ -1,0 +1,11 @@
+{
+    // `native` and `wasi` are mutually exclusive, so never use all features.
+    // To work on the wasi backend, swap in:
+    //   "rust-analyzer.cargo.noDefaultFeatures": true,
+    //   "rust-analyzer.cargo.features": ["wasi"],
+    //   "rust-analyzer.cargo.target": "wasm32-wasip2",
+    "rust-analyzer.cargo.features": [],
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.check.extraArgs": ["--all-targets"],
+    "rust-analyzer.check.features": []
+}
