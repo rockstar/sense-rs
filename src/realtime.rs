@@ -20,7 +20,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::client::{CONNECT_TIMEOUT, PROTOCOL_VERSION, api_error};
 use crate::error::{Error, Result};
-use crate::models::ConnectionState;
+use crate::models::{ConnectionState, null_as_default};
 
 /// How long the feed may be silent before it's treated as dead.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -266,22 +266,22 @@ pub struct RealtimeUpdate {
     /// Line frequency.
     pub hz: Option<f64>,
     /// Per-leg power.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub channels: Vec<f64>,
     /// Per-leg voltage.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub voltage: Vec<f64>,
     /// Per-leg current.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub amps: Vec<f64>,
     /// Per-leg solar power.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub solar: Vec<f64>,
     /// Devices currently drawing power.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub devices: Vec<RealtimeDevice>,
     /// Recent changes in power draw.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub deltas: Vec<Delta>,
     /// Smoothed total consumption. Meaning not confirmed; the API is undocumented.
     pub d_w: Option<f64>,
@@ -329,7 +329,7 @@ pub struct RealtimeDevice {
     /// State details (dimmer intensity, battery charge, ...).
     pub sd: Option<serde_json::Value>,
     /// Device attributes. Meaning not confirmed; the API is undocumented.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub attrs: Vec<String>,
 }
 
@@ -573,6 +573,16 @@ mod tests {
         assert_eq!(u.devices[0].name.as_deref(), Some("Fridge"));
         assert_eq!(u.deltas[0].w, None);
         assert_eq!(u.deltas[1].channel, None);
+    }
+
+    #[test]
+    fn decodes_realtime_update_with_nil_lists() {
+        let payload = map(vec![("w", Value::from(1.0)), ("deltas", Value::Nil)]);
+        let ev = decode_frame(&frame("realtime_update", payload)).unwrap();
+        let RealtimeMessage::Update(u) = ev.message else {
+            panic!("wrong variant")
+        };
+        assert!(u.deltas.is_empty());
     }
 
     #[test]

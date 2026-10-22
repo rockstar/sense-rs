@@ -11,7 +11,7 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Reads `null` as the default, for fields the API sends as either.
-fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+pub(crate) fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: Default + Deserialize<'de>,
@@ -37,7 +37,7 @@ pub struct AuthResponse {
     /// Token used to get a new access token.
     pub refresh_token: String,
     /// Monitors on the account.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub monitors: Vec<Monitor>,
     /// When the account was created (ISO 8601).
     pub date_created: Option<String>,
@@ -68,7 +68,7 @@ pub struct Session {
     /// The logged-in user. Sent back when renewing tokens.
     pub user_id: i64,
     /// Monitor ids returned at login. Empty when restoring a session from tokens alone.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub monitor_ids: Vec<i64>,
 }
 
@@ -149,7 +149,7 @@ pub struct MonitorOverview {
     /// Utility or partner the monitor came through, if any.
     pub partner_channel: Option<String>,
     /// Partner-specific tags.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub partner_tags: Vec<String>,
 }
 
@@ -193,10 +193,10 @@ pub struct MonitorStatusInfo {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DeviceDetection {
     /// Devices recently found.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub found: Vec<DetectedDevice>,
     /// Devices Sense is still learning.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub in_progress: Vec<DetectedDevice>,
     /// Total devices detected.
     pub num_detected: Option<i64>,
@@ -232,7 +232,7 @@ pub struct DevicesOverview {
     /// Changes when the device list changes. Compare with [`DataChange::device_data_checksum`](crate::realtime::DataChange::device_data_checksum).
     pub device_data_checksum: Option<String>,
     /// The devices.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub devices: Vec<Device>,
 }
 
@@ -252,15 +252,15 @@ pub struct Device {
     /// Icon name.
     pub icon: Option<String>,
     /// Free-form device metadata. Values are usually strings, including `"true"`/`"false"`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub tags: HashMap<String, serde_json::Value>,
     /// Share of the total, as a percentage.
     pub pct: Option<f64>,
     /// Usage per step, in kWh.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub history: Vec<Option<f64>>,
     /// Cost per step, in cents.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub cost_history: Vec<Option<f64>>,
     /// Cents.
     pub total_cost: Option<f64>,
@@ -395,13 +395,13 @@ pub struct EnergyTotals {
     /// Cents.
     pub total_cost: Option<f64>,
     /// kWh per step.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub totals: Vec<Option<f64>>,
     /// Cents per step.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub total_costs: Vec<Option<f64>>,
     /// Per-device totals.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub devices: Vec<Device>,
 }
 
@@ -422,7 +422,7 @@ pub struct Usage {
     /// Time of the last available sample (ISO 8601).
     pub end_of_data: Option<String>,
     /// Samples, one inner list per frame. Meaning not confirmed; the API is undocumented.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub totals: Vec<Vec<Option<f64>>>,
 }
 
@@ -500,5 +500,11 @@ mod tests {
         assert_eq!(consumption.devices[0].cost_history, vec![Some(0.5), None]);
         assert_eq!(consumption.devices[0].name, None);
         assert!(trends.top_movers.is_empty());
+    }
+
+    #[test]
+    fn null_lists_decode_as_empty() {
+        let overview: DevicesOverview = serde_json::from_str(r#"{"devices":null}"#).unwrap();
+        assert!(overview.devices.is_empty());
     }
 }
