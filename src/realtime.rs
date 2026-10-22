@@ -31,8 +31,8 @@ const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// sends [`RealtimeMessage::Update`] about once a second.
 ///
 /// If nothing arrives for half the idle timeout, the feed sends a websocket
-/// ping. If nothing arrives for the whole timeout (30 s by default), the
-/// connection is presumed dead: the stream yields [`Error::Timeout`] and
+/// ping. If nothing answers within the other half (30 s timeout by default),
+/// the connection is presumed dead: the stream yields [`Error::Timeout`] and
 /// then ends. Reconnect with [`Client::realtime`](crate::Client::realtime).
 ///
 /// If the server rejects the token mid-feed, the stream yields
@@ -180,7 +180,9 @@ impl Stream for RealtimeFeed {
                 return Poll::Ready(Some(Err(e.into())));
             }
             self.pinged = true;
-            let deadline = self.last_seen + self.idle_timeout;
+            // Count from the ping, not the last frame: a late read must still
+            // give the pong time to arrive.
+            let deadline = Instant::now() + self.idle_timeout / 2;
             self.timer.as_mut().reset(deadline);
         }
         Poll::Pending
@@ -489,6 +491,21 @@ mod tests {
         let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
         feed.set_idle_timeout(SHORT);
 
+        let waited = tokio::time::timeout(SHORT * 4, feed.next()).await;
+        assert!(
+            waited.is_err(),
+            "expected no event and no timeout, got {waited:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn quiet_connection_read_late_stays_open() {
+        let url = ws_server(|mut ws| async move { while ws.next().await.is_some() {} }).await;
+        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        feed.set_idle_timeout(SHORT);
+
+        // Nobody polls the feed past the whole idle timeout.
+        tokio::time::sleep(SHORT * 2).await;
         let waited = tokio::time::timeout(SHORT * 4, feed.next()).await;
         assert!(
             waited.is_err(),
