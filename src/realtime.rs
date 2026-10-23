@@ -92,7 +92,8 @@ impl RealtimeFeed {
     }
 
     /// Change how long the feed may be silent before it's treated as dead.
-    /// A ping is sent after half of it.
+    /// A ping is sent after half of it. Very long values (up to
+    /// [`Duration::MAX`]) are capped at about two years.
     pub fn set_idle_timeout(&mut self, timeout: Duration) {
         self.idle_timeout = timeout;
         self.mark_alive();
@@ -101,8 +102,14 @@ impl RealtimeFeed {
     fn mark_alive(&mut self) {
         self.last_seen = Instant::now();
         self.pinged = false;
-        let ping_at = self.last_seen + self.idle_timeout / 2;
+        let ping_at = self.last_seen + self.half_timeout();
         self.timer.as_mut().reset(ping_at);
+    }
+
+    /// Half the idle timeout, capped so adding it to `Instant::now()` can't
+    /// overflow.
+    fn half_timeout(&self) -> Duration {
+        (self.idle_timeout / 2).min(Duration::from_secs(86_400 * 365))
     }
 
     /// Ask the server to (re)start sending realtime updates.
@@ -182,7 +189,7 @@ impl Stream for RealtimeFeed {
             self.pinged = true;
             // Count from the ping, not the last frame: a late read must still
             // give the pong time to arrive.
-            let deadline = Instant::now() + self.idle_timeout / 2;
+            let deadline = Instant::now() + self.half_timeout();
             self.timer.as_mut().reset(deadline);
         }
         Poll::Pending
@@ -511,6 +518,16 @@ mod tests {
             waited.is_err(),
             "expected no event and no timeout, got {waited:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn max_idle_timeout_does_not_panic() {
+        let url = ws_server(|mut ws| async move { while ws.next().await.is_some() {} }).await;
+        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        feed.set_idle_timeout(Duration::MAX);
+
+        let waited = tokio::time::timeout(SHORT, feed.next()).await;
+        assert!(waited.is_err(), "expected no event, got {waited:?}");
     }
 
     #[tokio::test]
