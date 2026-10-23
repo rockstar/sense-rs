@@ -1,0 +1,3 @@
+# Runs `cargo test --target wasm32-wasip2` under wasmtime with wasi-http.
+[target.wasm32-wasip2]
+runner = "wasmtime run -S http"

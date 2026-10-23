@@ -37,6 +37,13 @@ repos:
         types_or: [rust, toml]
         pass_filenames: false
 
+      - id: cargo-test-wasi
+        name: cargo test wasi (needs wasmtime)
+        entry: cargo test --lib --target wasm32-wasip2 --no-default-features --features wasi
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false
+
       - id: cargo-semver-checks
         name: cargo semver-checks
         entry: cargo semver-checks --default-features
