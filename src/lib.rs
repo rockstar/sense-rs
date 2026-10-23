@@ -51,7 +51,7 @@
 //!   blocking client. Request timeouts are left to the host.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![warn(unnameable_types, unreachable_pub)]
+#![deny(unnameable_types, unreachable_pub)]
 
 #[cfg(all(feature = "native", feature = "wasi"))]
 compile_error!(
