@@ -50,3 +50,11 @@ repos:
         language: system
         types_or: [rust, toml]
         pass_filenames: false
+
+      # Host target: cargo-semver-checks fails to build rustdoc with `--target wasm32-wasip2`.
+      - id: cargo-semver-checks-wasi
+        name: cargo semver-checks wasi
+        entry: cargo semver-checks --only-explicit-features --features wasi
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false

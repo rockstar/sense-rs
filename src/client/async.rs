@@ -11,6 +11,7 @@ use crate::models::*;
 use crate::realtime::RealtimeFeed;
 
 const DEFAULT_API_URL: &str = "https://api.sense.com/apiservice/api/v1/";
+#[cfg(feature = "native")]
 const DEFAULT_REALTIME_URL: &str = "wss://clientrt.sense.com/";
 
 /// Async client for the Sense API.
@@ -24,7 +25,7 @@ pub struct Client {
 struct Inner {
     http: Http,
     api_url: String,
-    #[cfg_attr(not(feature = "native"), allow(dead_code))]
+    #[cfg(feature = "native")]
     realtime_url: String,
     session: RwLock<Option<Session>>,
     /// Held while renewing, so concurrent 401s trigger only one `/renew`.
@@ -35,6 +36,7 @@ struct Inner {
 #[derive(Debug, Clone)]
 pub struct ClientBuilder {
     api_url: String,
+    #[cfg(feature = "native")]
     realtime_url: String,
     session: Option<Session>,
 }
@@ -43,6 +45,7 @@ impl Default for ClientBuilder {
     fn default() -> Self {
         Self {
             api_url: DEFAULT_API_URL.into(),
+            #[cfg(feature = "native")]
             realtime_url: DEFAULT_REALTIME_URL.into(),
             session: None,
         }
@@ -57,6 +60,8 @@ impl ClientBuilder {
     }
 
     /// Override the realtime websocket base URL (default `wss://clientrt.sense.com/`).
+    /// Requires the `native` feature.
+    #[cfg(feature = "native")]
     pub fn realtime_url(mut self, url: impl Into<String>) -> Self {
         self.realtime_url = with_trailing_slash(url.into());
         self
@@ -74,6 +79,7 @@ impl ClientBuilder {
             inner: Arc::new(Inner {
                 http: Http::new()?,
                 api_url: self.api_url,
+                #[cfg(feature = "native")]
                 realtime_url: self.realtime_url,
                 session: RwLock::new(self.session),
                 renew_lock: tokio::sync::Mutex::new(()),
