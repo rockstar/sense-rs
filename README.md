@@ -3,9 +3,8 @@
 Unofficial Rust client for the [Sense](https://sense.com) home energy monitor API.
 The API is undocumented and may change without notice.
 
-```toml
-[dependencies]
-sense-rs = "0.1"
+```sh
+cargo add sense-rs
 ```
 
 The crate imports as `sense`. The default API is async (Tokio). A blocking API is in `sense::sync`.
@@ -43,8 +42,8 @@ for event in client.realtime(client.default_monitor_id().unwrap())? { /* ... */ 
 For `wasm32-wasip2` components, swap the default `native` feature for `wasi`, which sends
 requests through [wasi-http](https://github.com/WebAssembly/wasi-http) using `wstd`:
 
-```toml
-sense-rs = { version = "0.1", default-features = false, features = ["wasi"] }
+```sh
+cargo add sense-rs --no-default-features --features wasi
 ```
 
 The two features are mutually exclusive. `wasi` covers the REST endpoints only: there's no
