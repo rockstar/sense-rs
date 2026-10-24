@@ -217,6 +217,7 @@ pub struct DetectedDevice {
 /// Whether a monitor is connected to Sense.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[non_exhaustive]
 pub enum ConnectionState {
     /// Connecting.
     Connecting,
@@ -224,6 +225,14 @@ pub enum ConnectionState {
     Online,
     /// Not connected.
     Offline,
+    /// A state this crate doesn't know about yet.
+    ///
+    /// As the Sense API is not public, there's no guarantee
+    /// that new states won't be introduced. Rather than just
+    /// breaking the deserialization, we have this state to
+    /// represent those unexpected states.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Returned by `GET app/monitors/{id}/devices/overview`.
@@ -506,5 +515,12 @@ mod tests {
     fn null_lists_decode_as_empty() {
         let overview: DevicesOverview = serde_json::from_str(r#"{"devices":null}"#).unwrap();
         assert!(overview.devices.is_empty());
+    }
+
+    #[test]
+    fn unknown_connection_state_decodes() {
+        let info: MonitorStatusInfo =
+            serde_json::from_str(r#"{"connection_state":"SOMETHING_NEW"}"#).unwrap();
+        assert_eq!(info.connection_state, Some(ConnectionState::Unknown));
     }
 }
