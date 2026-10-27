@@ -472,6 +472,7 @@ pub(crate) fn api_error(status: StatusCode, body: &[u8]) -> Error {
 #[cfg(feature = "native")]
 mod tests {
     use super::*;
+    use crate::client::PROTOCOL_VERSION;
 
     #[test]
     fn mfa_error_is_detected() {
@@ -496,7 +497,18 @@ mod tests {
     struct Seen {
         line: String,
         auth: Option<String>,
+        /// The request line and headers.
+        head: String,
         body: String,
+    }
+
+    impl Seen {
+        fn header(&self, name: &str) -> Option<&str> {
+            self.head.lines().find_map(|l| {
+                let (k, v) = l.split_once(':')?;
+                k.eq_ignore_ascii_case(name).then(|| v.trim())
+            })
+        }
     }
 
     /// Reads one HTTP request from `sock`.
@@ -512,23 +524,23 @@ mod tests {
                 break i + 4;
             }
         };
-        let head = String::from_utf8_lossy(&buf[..header_end]).into_owned();
-        let header = |name: &str| {
-            head.lines().find_map(|l| {
-                let (k, v) = l.split_once(':')?;
-                k.eq_ignore_ascii_case(name).then(|| v.trim().to_string())
-            })
+        let mut seen = Seen {
+            line: String::new(),
+            auth: None,
+            head: String::from_utf8_lossy(&buf[..header_end]).into_owned(),
+            body: String::new(),
         };
-        let len: usize = header("content-length").map_or(0, |v| v.parse().unwrap());
+        seen.line = seen.head.lines().next().unwrap().to_string();
+        seen.auth = seen.header("authorization").map(str::to_string);
+        let len: usize = seen
+            .header("content-length")
+            .map_or(0, |v| v.parse().unwrap());
         while buf.len() < header_end + len {
             let n = sock.read(&mut chunk).await.unwrap();
             buf.extend_from_slice(&chunk[..n]);
         }
-        Seen {
-            line: head.lines().next().unwrap().to_string(),
-            auth: header("authorization"),
-            body: String::from_utf8_lossy(&buf[header_end..]).into_owned(),
-        }
+        seen.body = String::from_utf8_lossy(&buf[header_end..]).into_owned();
+        seen
     }
 
     async fn write_response(sock: &mut tokio::net::TcpStream, (status, body): (u16, &str)) {
@@ -618,6 +630,42 @@ mod tests {
 
         let seen = rt.block_on(server).unwrap();
         assert!(seen[0].line.starts_with("GET /app/monitors/1/status "));
+        assert_eq!(seen[0].auth.as_deref(), Some("bearer old-access"));
+    }
+
+    #[tokio::test]
+    async fn sends_required_headers() {
+        let (url, server) = mock_server(vec![(200, "{}")]).await;
+        client_for(url).monitor_status(1).await.unwrap();
+
+        let seen = server.await.unwrap();
+        assert_eq!(seen[0].header("x-sense-protocol"), Some(PROTOCOL_VERSION));
+        assert_eq!(
+            seen[0].header("user-agent"),
+            Some(concat!("sense-rs/", env!("CARGO_PKG_VERSION")))
+        );
+    }
+
+    #[tokio::test]
+    async fn realtime_sends_required_headers() {
+        let (ws_url, ws) = mock_server(vec![(500, r#"{"status":"error"}"#)]).await;
+        let client = Client::builder()
+            .realtime_url(ws_url.replacen("http", "ws", 1))
+            .session(Session {
+                access_token: "old-access".into(),
+                refresh_token: "old-refresh".into(),
+                user_id: 7,
+                monitor_ids: vec![1],
+            })
+            .build()
+            .unwrap();
+
+        let err = client.realtime(1).await.err().unwrap();
+
+        assert!(matches!(err, Error::Api { status: 500, .. }), "{err:?}");
+        let seen = ws.await.unwrap();
+        assert_eq!(seen[0].header("accept"), Some("application/x-msgpack"));
+        assert_eq!(seen[0].header("x-sense-protocol"), Some(PROTOCOL_VERSION));
         assert_eq!(seen[0].auth.as_deref(), Some("bearer old-access"));
     }
 
