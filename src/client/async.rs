@@ -836,6 +836,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logout_clears_session() {
+        let (url, server) = mock_server(vec![(200, "{}")]).await;
+        let client = client_for(url);
+
+        client.logout().await.unwrap();
+
+        let seen = server.await.unwrap();
+        assert!(seen[0].line.starts_with("GET /logout "), "{}", seen[0].line);
+        assert_eq!(seen[0].auth.as_deref(), Some("bearer old-access"));
+        assert!(client.session().is_none());
+    }
+
+    #[tokio::test]
+    async fn logout_clears_session_on_server_error() {
+        let (url, server) = mock_server(vec![(500, r#"{"status":"error"}"#)]).await;
+        let client = client_for(url);
+
+        let err = client.logout().await.unwrap_err();
+
+        assert!(matches!(err, Error::Api { status: 500, .. }), "{err:?}");
+        assert_eq!(server.await.unwrap().len(), 1);
+        assert!(client.session().is_none());
+    }
+
+    #[tokio::test]
     async fn second_401_is_returned_not_retried() {
         let (url, server) = mock_server(vec![EXPIRED, RENEWED, EXPIRED]).await;
         let client = client_for(url);
