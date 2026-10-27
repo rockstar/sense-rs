@@ -194,3 +194,91 @@ impl Iterator for RealtimeFeed {
         self.rt.block_on(self.inner.next())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::realtime::RealtimeMessage;
+    use rmpv::Value;
+    use tokio_tungstenite::tungstenite::{self, Message};
+
+    /// A blocking client whose realtime URL points at a websocket server
+    /// running `serve` on its own thread.
+    fn client_with_ws_server<F>(serve: F) -> (Client, std::thread::JoinHandle<()>)
+    where
+        F: FnOnce(tungstenite::WebSocket<std::net::TcpStream>) + Send + 'static,
+    {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (sock, _) = listener.accept().unwrap();
+            serve(tungstenite::accept(sock).unwrap());
+        });
+        let inner = crate::Client::builder()
+            .realtime_url(url)
+            .session(Session {
+                access_token: "access".into(),
+                refresh_token: "refresh".into(),
+                user_id: 7,
+                monitor_ids: vec![1],
+            })
+            .build()
+            .unwrap();
+        (Client::from_async(inner).unwrap(), server)
+    }
+
+    fn command_kind(msg: Message) -> String {
+        let Message::Binary(bytes) = msg else {
+            panic!("expected a binary frame, got {msg:?}")
+        };
+        let kind = rmpv::decode::read_value(&mut &bytes[..]).unwrap();
+        kind.as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn feed_yields_events_then_ends() {
+        let (client, server) = client_with_ws_server(|mut ws| {
+            let mut hello = Vec::new();
+            for v in [
+                Value::from("hello"),
+                Value::from(1_700_000_000),
+                Value::Map(Vec::new()),
+            ] {
+                rmpv::encode::write_value(&mut hello, &v).unwrap();
+            }
+            ws.send(Message::Binary(hello.into())).unwrap();
+            ws.close(None).unwrap();
+            // Drain until the close handshake finishes.
+            while ws.read().is_ok() {}
+        });
+
+        let events: Vec<_> = client.realtime(1).unwrap().collect();
+        server.join().unwrap();
+
+        assert_eq!(events.len(), 1, "{events:?}");
+        let ev = events.into_iter().next().unwrap().unwrap();
+        assert_eq!(ev.epoch, 1_700_000_000);
+        assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
+    }
+
+    #[test]
+    fn start_updates_and_close_reach_the_server() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (client, server) = client_with_ws_server(move |mut ws| {
+            for _ in 0..3 {
+                tx.send(ws.read().unwrap()).unwrap();
+            }
+        });
+
+        let mut feed = client.realtime(1).unwrap();
+        feed.start_updates().unwrap();
+        feed.close().unwrap();
+        server.join().unwrap();
+
+        // `connect` sends the first start command; `start_updates` the second.
+        assert_eq!(command_kind(rx.recv().unwrap()), "start_realtime_updates");
+        assert_eq!(command_kind(rx.recv().unwrap()), "start_realtime_updates");
+        let msg = rx.recv().unwrap();
+        assert!(matches!(msg, Message::Close(_)), "{msg:?}");
+    }
+}
