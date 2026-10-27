@@ -490,6 +490,23 @@ mod tests {
             api_error(StatusCode::UNAUTHORIZED, body),
             Error::Api { status: 401, reason: Some(r) } if r == "Bad email or password"
         ));
+
+        // Without `error_reason`, `status` is the reason.
+        let body = br#"{"status":"rate_limited"}"#;
+        assert!(matches!(
+            api_error(StatusCode::TOO_MANY_REQUESTS, body),
+            Error::Api { status: 429, reason: Some(r) } if r == "rate_limited"
+        ));
+
+        // A body that isn't JSON has no reason.
+        let body = b"<html>Bad Gateway</html>";
+        assert!(matches!(
+            api_error(StatusCode::BAD_GATEWAY, body),
+            Error::Api {
+                status: 502,
+                reason: None
+            }
+        ));
     }
 
     /// One request as the mock server saw it.
