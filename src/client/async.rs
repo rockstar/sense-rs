@@ -608,6 +608,22 @@ mod tests {
     );
 
     #[test]
+    fn default_monitor_id_is_none_without_monitor_ids() {
+        let client = Client::builder().build().unwrap();
+        assert_eq!(client.default_monitor_id(), None);
+
+        for json in [
+            r#"{"access_token":"a","refresh_token":"r","user_id":7}"#,
+            r#"{"access_token":"a","refresh_token":"r","user_id":7,"monitor_ids":null}"#,
+        ] {
+            let session: Session = serde_json::from_str(json).unwrap();
+            assert!(session.monitor_ids.is_empty(), "{json}");
+            client.set_session(Some(session));
+            assert_eq!(client.default_monitor_id(), None, "{json}");
+        }
+    }
+
+    #[test]
     fn path_segment_escapes_separators() {
         assert_eq!(path_segment("abc-1_2.3~").unwrap(), "abc-1_2.3~");
         assert_eq!(path_segment("../users/1").unwrap(), "..%2Fusers%2F1");
