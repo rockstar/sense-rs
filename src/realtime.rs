@@ -529,6 +529,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connect_sends_start_command() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let url = ws_server(|mut ws| async move {
+            let _ = tx.send(ws.next().await.unwrap().unwrap());
+        })
+        .await;
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let _feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+
+        let Message::Binary(bytes) = rx.await.unwrap() else {
+            panic!("expected a binary frame")
+        };
+        let mut cur = &bytes[..];
+        let kind = rmpv::decode::read_value(&mut cur).unwrap();
+        let epoch = rmpv::decode::read_value(&mut cur).unwrap();
+        let payload = rmpv::decode::read_value(&mut cur).unwrap();
+        assert_eq!(kind.as_str(), Some("start_realtime_updates"));
+        assert!(epoch.as_u64().unwrap() >= before, "{epoch:?}");
+        assert_eq!(payload, Value::Map(Vec::new()));
+        assert!(cur.is_empty(), "trailing bytes: {cur:?}");
+    }
+
+    #[tokio::test]
+    async fn close_sends_close_frame() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let url = ws_server(|mut ws| async move {
+            // Skip the start command.
+            ws.next().await.unwrap().unwrap();
+            let _ = tx.send(ws.next().await.unwrap().unwrap());
+        })
+        .await;
+        let feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        feed.close().await.unwrap();
+
+        let msg = rx.await.unwrap();
+        assert!(matches!(msg, Message::Close(_)), "{msg:?}");
+    }
+
+    #[tokio::test]
     async fn bad_token_is_an_error_not_a_panic() {
         let err = RealtimeFeed::connect("ws://127.0.0.1:1/", "token\n")
             .await
