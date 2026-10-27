@@ -25,7 +25,13 @@
 //!
 //! let mut feed = client.realtime(monitor).await?;
 //! while let Some(event) = feed.next().await {
-//!     if let RealtimeMessage::Update(u) = event?.message {
+//!     let event = match event {
+//!         Ok(event) => event,
+//!         // Bad messages and server `error`s don't end the feed.
+//!         Err(e @ (Error::Decode(_) | Error::Realtime(_))) => { eprintln!("{e}"); continue; }
+//!         Err(e) => return Err(e),
+//!     };
+//!     if let RealtimeMessage::Update(u) = event.message {
 //!         println!("{} W", u.w);
 //!     }
 //! }

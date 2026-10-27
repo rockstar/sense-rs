@@ -25,7 +25,17 @@ async fn main() -> sense::Result<()> {
 
     let mut feed = client.realtime(monitor).await?;
     while let Some(event) = feed.next().await {
-        match event?.message {
+        // A bad message or a server `error` doesn't end the feed, so keep going.
+        // Anything else (timeout, socket closed) means open a new feed.
+        let event = match event {
+            Ok(event) => event,
+            Err(e @ (Error::Decode(_) | Error::Realtime(_))) => {
+                eprintln!("{e}");
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        match event.message {
             RealtimeMessage::Update(u) => {
                 let on: Vec<_> = u.devices.iter().filter_map(|d| d.name.as_deref()).collect();
                 println!(

@@ -6,12 +6,19 @@
 //!
 //! ```no_run
 //! use sense::sync::Client;
+//! use sense::Error;
 //!
 //! let client = Client::new()?;
 //! client.login("me@example.com", "hunter2")?;
 //! let monitor = client.default_monitor_id().unwrap();
 //! for event in client.realtime(monitor)? {
-//!     if let sense::realtime::RealtimeMessage::Update(u) = event?.message {
+//!     let event = match event {
+//!         Ok(event) => event,
+//!         // Bad messages and server `error`s don't end the feed.
+//!         Err(e @ (Error::Decode(_) | Error::Realtime(_))) => { eprintln!("{e}"); continue; }
+//!         Err(e) => return Err(e),
+//!     };
+//!     if let sense::realtime::RealtimeMessage::Update(u) = event.message {
 //!         println!("{} W", u.w);
 //!     }
 //! }
