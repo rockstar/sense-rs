@@ -41,7 +41,6 @@ const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct RealtimeFeed {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     idle_timeout: Duration,
-    last_seen: Instant,
     /// Fires at the ping time, then (after a ping) at the idle deadline.
     timer: Pin<Box<Sleep>>,
     pinged: bool,
@@ -82,7 +81,6 @@ impl RealtimeFeed {
         let mut feed = RealtimeFeed {
             ws,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
-            last_seen: now,
             timer: Box::pin(tokio::time::sleep_until(now + DEFAULT_IDLE_TIMEOUT / 2)),
             pinged: false,
             done: false,
@@ -100,9 +98,8 @@ impl RealtimeFeed {
     }
 
     fn mark_alive(&mut self) {
-        self.last_seen = Instant::now();
         self.pinged = false;
-        let ping_at = self.last_seen + self.half_timeout();
+        let ping_at = Instant::now() + self.half_timeout();
         self.timer.as_mut().reset(ping_at);
     }
 
