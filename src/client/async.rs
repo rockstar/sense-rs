@@ -941,6 +941,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_url_without_trailing_slash() {
+        let (url, server) = mock_server(vec![(200, "{}")]).await;
+        let url = format!("{}api", url);
+        client_for(url).device(1, "d").await.unwrap();
+
+        let seen = server.await.unwrap();
+        assert_eq!(target(&seen[0]), "/api/app/monitors/1/devices/d");
+    }
+
+    #[tokio::test]
     async fn trends_without_start_sends_now() {
         let (url, server) = mock_server(vec![(200, "{}")]).await;
         client_for(url).trends(1, Scale::Day, None).await.unwrap();
