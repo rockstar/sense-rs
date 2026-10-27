@@ -860,6 +860,69 @@ mod tests {
         assert!(client.session().is_none());
     }
 
+    /// The path and query of a request line like `GET /a?b=c HTTP/1.1`.
+    fn target(seen: &Seen) -> &str {
+        seen.line.split(' ').nth(1).unwrap()
+    }
+
+    #[tokio::test]
+    async fn history_queries() {
+        let (url, server) = mock_server(vec![(200, "{}"); 3]).await;
+        let client = client_for(url);
+
+        client
+            .trends(1, Scale::Week, Some("2024-01-02T03:04:05Z"))
+            .await
+            .unwrap();
+        client
+            .usage(2, Granularity::Hour, "2024-01-02T03:04:05Z", 24)
+            .await
+            .unwrap();
+        client.cumulative(3).await.unwrap();
+
+        let seen = server.await.unwrap();
+        assert_eq!(
+            target(&seen[0]),
+            "/app/history/trends?monitor_id=1&scale=WEEK&start=2024-01-02T03%3A04%3A05Z"
+        );
+        assert_eq!(
+            target(&seen[1]),
+            "/app/history/usage?monitor_id=2&granularity=hour&start=2024-01-02T03%3A04%3A05Z&frames=24"
+        );
+        assert_eq!(target(&seen[2]), "/app/history/cumulative?monitor_id=3");
+    }
+
+    #[tokio::test]
+    async fn trends_without_start_sends_now() {
+        let (url, server) = mock_server(vec![(200, "{}")]).await;
+        client_for(url).trends(1, Scale::Day, None).await.unwrap();
+
+        let seen = server.await.unwrap();
+        let start = target(&seen[0])
+            .strip_prefix("/app/history/trends?monitor_id=1&scale=DAY&start=")
+            .unwrap_or_else(|| panic!("{}", seen[0].line))
+            .replace("%3A", ":");
+        let sent: jiff::Timestamp = start.parse().unwrap();
+        let age = jiff::Timestamp::now().as_second() - sent.as_second();
+        assert!((0..60).contains(&age), "{start}");
+    }
+
+    #[test]
+    fn scale_and_granularity_display() {
+        let scales = [
+            Scale::Day,
+            Scale::Week,
+            Scale::Month,
+            Scale::Year,
+            Scale::Cycle,
+        ];
+        let shown: Vec<_> = scales.iter().map(ToString::to_string).collect();
+        assert_eq!(shown, ["DAY", "WEEK", "MONTH", "YEAR", "CYCLE"]);
+        let granularities = [Granularity::Second, Granularity::Minute, Granularity::Hour];
+        let shown: Vec<_> = granularities.iter().map(ToString::to_string).collect();
+        assert_eq!(shown, ["second", "minute", "hour"]);
+    }
+
     #[tokio::test]
     async fn second_401_is_returned_not_retried() {
         let (url, server) = mock_server(vec![EXPIRED, RENEWED, EXPIRED]).await;
