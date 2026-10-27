@@ -262,7 +262,8 @@ pub struct DataChange {
 /// Instantaneous power readings. Watts unless noted.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RealtimeUpdate {
-    /// Total consumption.
+    /// Total consumption. `0.0` if the server omits it or sends null.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub w: f64,
     /// Consumption cost rate.
     pub c: Option<f64>,
@@ -324,7 +325,7 @@ pub struct RealtimeUpdate {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RealtimeDevice {
     /// Device ID.
-    pub id: String,
+    pub id: Option<String>,
     /// Display name.
     pub name: Option<String>,
     /// Icon name.
@@ -617,6 +618,24 @@ mod tests {
             panic!("wrong variant")
         };
         assert!(u.deltas.is_empty());
+    }
+
+    #[test]
+    fn decodes_realtime_update_with_nil_w_and_device_without_id() {
+        let payload = map(vec![
+            ("w", Value::Nil),
+            (
+                "devices",
+                Value::Array(vec![map(vec![("name", Value::from("Fridge"))])]),
+            ),
+        ]);
+        let ev = decode_frame(&frame("realtime_update", payload)).unwrap();
+        let RealtimeMessage::Update(u) = ev.message else {
+            panic!("wrong variant")
+        };
+        assert_eq!(u.w, 0.0);
+        assert_eq!(u.devices[0].id, None);
+        assert_eq!(u.devices[0].name.as_deref(), Some("Fridge"));
     }
 
     #[test]
