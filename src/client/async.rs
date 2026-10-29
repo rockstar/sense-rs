@@ -4,55 +4,57 @@ use std::sync::{Arc, PoisonError, RwLock};
 use http::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 
-use super::http::Http;
+use super::request::build_request;
 use crate::error::{Error, Result};
 use crate::models::*;
-#[cfg(feature = "native")]
+#[cfg(not(target_family = "wasm"))]
 use crate::realtime::RealtimeFeed;
+use crate::transport::HttpTransport;
+#[cfg(not(target_family = "wasm"))]
+use crate::transport::NativeTransport;
 
 const DEFAULT_API_URL: &str = "https://api.sense.com/apiservice/api/v1/";
-#[cfg(feature = "native")]
 const DEFAULT_REALTIME_URL: &str = "wss://clientrt.sense.com/";
 
-/// Async client for the Sense API.
+/// Async client for the Sense API, sending requests through an
+/// [`HttpTransport`].
 ///
-/// Cheap to clone; clones share the HTTP connection pool and the session.
-#[derive(Clone)]
-pub struct Client {
-    inner: Arc<Inner>,
+/// Cheap to clone; clones share the transport and the session.
+pub struct Client<T> {
+    inner: Arc<Inner<T>>,
 }
 
-struct Inner {
-    http: Http,
+impl<T> Clone for Client<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+struct Inner<T> {
+    transport: T,
     api_url: String,
-    #[cfg(feature = "native")]
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(dead_code, reason = "native-only realtime feed")
+    )]
     realtime_url: String,
     session: RwLock<Option<Session>>,
     /// Held while renewing, so concurrent 401s trigger only one `/renew`.
     renew_lock: tokio::sync::Mutex<()>,
 }
 
-/// Configures a [`Client`].
+/// Configures a [`Client`]. Start one with [`Client::builder`].
 #[derive(Debug, Clone)]
-pub struct ClientBuilder {
+pub struct ClientBuilder<T> {
+    transport: T,
     api_url: String,
-    #[cfg(feature = "native")]
     realtime_url: String,
     session: Option<Session>,
 }
 
-impl Default for ClientBuilder {
-    fn default() -> Self {
-        Self {
-            api_url: DEFAULT_API_URL.into(),
-            #[cfg(feature = "native")]
-            realtime_url: DEFAULT_REALTIME_URL.into(),
-            session: None,
-        }
-    }
-}
-
-impl ClientBuilder {
+impl<T> ClientBuilder<T> {
     /// Override the REST base URL (default `https://api.sense.com/apiservice/api/v1/`).
     pub fn api_url(mut self, url: impl Into<String>) -> Self {
         self.api_url = with_trailing_slash(url.into());
@@ -60,8 +62,8 @@ impl ClientBuilder {
     }
 
     /// Override the realtime websocket base URL (default `wss://clientrt.sense.com/`).
-    /// Requires the `native` feature.
-    #[cfg(feature = "native")]
+    /// Native targets only.
+    #[cfg(not(target_family = "wasm"))]
     pub fn realtime_url(mut self, url: impl Into<String>) -> Self {
         self.realtime_url = with_trailing_slash(url.into());
         self
@@ -73,18 +75,17 @@ impl ClientBuilder {
         self
     }
 
-    /// Build the client. Fails only if the HTTP client can't be created.
-    pub fn build(self) -> Result<Client> {
-        Ok(Client {
+    /// Build the client.
+    pub fn build(self) -> Client<T> {
+        Client {
             inner: Arc::new(Inner {
-                http: Http::new()?,
+                transport: self.transport,
                 api_url: self.api_url,
-                #[cfg(feature = "native")]
                 realtime_url: self.realtime_url,
                 session: RwLock::new(self.session),
                 renew_lock: tokio::sync::Mutex::new(()),
             }),
-        })
+        }
     }
 }
 
@@ -95,27 +96,32 @@ fn with_trailing_slash(mut url: String) -> String {
     url
 }
 
-impl Default for Client {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Client {
-    /// A client with default settings and no session.
-    #[expect(
-        clippy::expect_used,
-        reason = "only fails if the TLS backend can't initialize"
-    )]
-    pub fn new() -> Self {
-        ClientBuilder::default()
-            .build()
-            .expect("default client configuration is valid")
+impl<T> Client<T> {
+    /// A client with default settings and no session that sends requests
+    /// through `transport`.
+    ///
+    /// ```no_run
+    /// # fn f() -> sense::Result<()> {
+    /// let client = sense::Client::new(sense::NativeTransport::new()?);
+    /// # Ok(()) }
+    /// ```
+    pub fn new(transport: T) -> Self {
+        Self::builder(transport).build()
     }
 
     /// A builder for a client with custom settings.
-    pub fn builder() -> ClientBuilder {
-        ClientBuilder::default()
+    pub fn builder(transport: T) -> ClientBuilder<T> {
+        ClientBuilder {
+            transport,
+            api_url: DEFAULT_API_URL.into(),
+            realtime_url: DEFAULT_REALTIME_URL.into(),
+            session: None,
+        }
+    }
+
+    /// The transport this client sends requests through.
+    pub fn transport(&self) -> &T {
+        &self.inner.transport
     }
 
     // ---- session -------------------------------------------------------
@@ -147,6 +153,27 @@ impl Client {
         self.session()?.monitor_ids.first().copied()
     }
 
+    fn access_token(&self) -> Result<String> {
+        self.inner
+            .session
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|s| s.access_token.clone())
+            .ok_or(Error::NotAuthenticated)
+    }
+
+    fn store_auth(&self, auth: &AuthResponse) {
+        self.set_session(Some(Session {
+            access_token: auth.access_token.clone(),
+            refresh_token: auth.refresh_token.clone(),
+            user_id: auth.user_id,
+            monitor_ids: auth.monitors.iter().map(|m| m.id).collect(),
+        }));
+    }
+}
+
+impl<T: HttpTransport> Client<T> {
     /// Log in with email and password.
     ///
     /// Returns [`Error::MfaRequired`] if the account has MFA enabled; finish
@@ -233,15 +260,6 @@ impl Client {
         result.map(drop)
     }
 
-    fn store_auth(&self, auth: &AuthResponse) {
-        self.set_session(Some(Session {
-            access_token: auth.access_token.clone(),
-            refresh_token: auth.refresh_token.clone(),
-            user_id: auth.user_id,
-            monitor_ids: auth.monitors.iter().map(|m| m.id).collect(),
-        }));
-    }
-
     // ---- monitors ------------------------------------------------------
 
     /// Overview of a monitor: settings, solar config, and device counts.
@@ -321,36 +339,12 @@ impl Client {
         .await
     }
 
-    // ---- realtime ------------------------------------------------------
-
-    /// Open the realtime websocket feed for a monitor. Requires the `native`
-    /// feature.
-    ///
-    /// A 401 on the handshake renews the token and retries once. A 401 from
-    /// the open feed ([`Error::Api`] with status 401) does not; call
-    /// [`renew`](Self::renew) before reconnecting.
-    #[cfg(feature = "native")]
-    pub async fn realtime(&self, monitor_id: i64) -> Result<RealtimeFeed> {
-        let url = format!(
-            "{}monitors/{monitor_id}/realtimefeed",
-            self.inner.realtime_url
-        );
-        let token = self.access_token()?;
-        match RealtimeFeed::connect(&url, &token).await {
-            Err(Error::Api { status: 401, .. }) => {
-                self.renew_after_401(&token).await?;
-                RealtimeFeed::connect(&url, &self.access_token()?).await
-            }
-            other => other,
-        }
-    }
-
     // ---- escape hatch --------------------------------------------------
 
     /// GET any endpoint, relative to the API base URL, as raw JSON.
     ///
     /// ```no_run
-    /// # async fn f(client: sense::Client) -> sense::Result<()> {
+    /// # async fn f<T: sense::HttpTransport>(client: sense::Client<T>) -> sense::Result<()> {
     /// let rate_zones = client.get_json("app/monitors/12345/rate_zones", &[]).await?;
     /// # Ok(()) }
     /// ```
@@ -364,28 +358,18 @@ impl Client {
 
     // ---- plumbing ------------------------------------------------------
 
-    fn access_token(&self) -> Result<String> {
-        self.inner
-            .session
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(|s| s.access_token.clone())
-            .ok_or(Error::NotAuthenticated)
-    }
-
-    async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
+    async fn get<R: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<R> {
         self.send(Method::GET, path, query, None, true).await
     }
 
-    async fn send<T: DeserializeOwned>(
+    async fn send<R: DeserializeOwned>(
         &self,
         method: Method,
         path: &str,
         query: &[(&str, String)],
         form: Option<&[(&str, &str)]>,
         authed: bool,
-    ) -> Result<T> {
+    ) -> Result<R> {
         let body = self.send_raw(method, path, query, form, authed).await?;
         serde_json::from_slice(&body).map_err(|e| Error::Decode(format!("{path}: {e}")))
     }
@@ -429,10 +413,34 @@ impl Client {
         access_token: Option<&str>,
     ) -> Result<(StatusCode, Vec<u8>)> {
         let url = format!("{}{path}", self.inner.api_url);
-        self.inner
-            .http
-            .request(method, &url, query, form, access_token)
-            .await
+        let req = build_request(method, &url, query, form, access_token)?;
+        let resp = self.inner.transport.send(req).await?;
+        let status = resp.status();
+        Ok((status, resp.into_body()))
+    }
+}
+
+/// The realtime feed needs [`NativeTransport`] for now.
+#[cfg(not(target_family = "wasm"))]
+impl Client<NativeTransport> {
+    /// Open the realtime websocket feed for a monitor.
+    ///
+    /// A 401 on the handshake renews the token and retries once. A 401 from
+    /// the open feed ([`Error::Api`] with status 401) does not; call
+    /// [`renew`](Self::renew) before reconnecting.
+    pub async fn realtime(&self, monitor_id: i64) -> Result<RealtimeFeed> {
+        let url = format!(
+            "{}monitors/{monitor_id}/realtimefeed",
+            self.inner.realtime_url
+        );
+        let token = self.access_token()?;
+        match RealtimeFeed::connect(&url, &token).await {
+            Err(Error::Api { status: 401, .. }) => {
+                self.renew_after_401(&token).await?;
+                RealtimeFeed::connect(&url, &self.access_token()?).await
+            }
+            other => other,
+        }
     }
 }
 
@@ -469,7 +477,7 @@ pub(crate) fn api_error(status: StatusCode, body: &[u8]) -> Error {
 }
 
 #[cfg(test)]
-#[cfg(feature = "native")]
+#[cfg(not(target_family = "wasm"))]
 mod tests {
     use super::*;
     use crate::client::PROTOCOL_VERSION;
@@ -588,8 +596,8 @@ mod tests {
         (url, handle)
     }
 
-    fn client_for(url: String) -> Client {
-        Client::builder()
+    fn client_for(url: String) -> Client<NativeTransport> {
+        Client::builder(NativeTransport::default())
             .api_url(url)
             .session(Session {
                 access_token: "old-access".into(),
@@ -598,7 +606,6 @@ mod tests {
                 monitor_ids: vec![1],
             })
             .build()
-            .unwrap()
     }
 
     const EXPIRED: (u16, &str) = (401, r#"{"status":"error","error_reason":"expired"}"#);
@@ -607,9 +614,20 @@ mod tests {
         r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
     );
 
+    /// Spawnable on a multi-threaded runtime: the reason `Client` is generic
+    /// rather than boxing a transport.
+    #[test]
+    fn native_futures_are_send() {
+        fn assert_send<F: Send>(_: F) {}
+        let client = Client::new(NativeTransport::default());
+        assert_send(client.trends(1, Scale::Day, None));
+        assert_send(client.login("a", "b"));
+        assert_send(client.realtime(1));
+    }
+
     #[test]
     fn default_monitor_id_is_none_without_monitor_ids() {
-        let client = Client::builder().build().unwrap();
+        let client = Client::builder(NativeTransport::default()).build();
         assert_eq!(client.default_monitor_id(), None);
 
         for json in [
@@ -682,7 +700,7 @@ mod tests {
     #[tokio::test]
     async fn realtime_sends_required_headers() {
         let (ws_url, ws) = mock_server(vec![(500, r#"{"status":"error"}"#)]).await;
-        let client = Client::builder()
+        let client = Client::builder(NativeTransport::default())
             .realtime_url(ws_url.replacen("http", "ws", 1))
             .session(Session {
                 access_token: "old-access".into(),
@@ -690,8 +708,7 @@ mod tests {
                 user_id: 7,
                 monitor_ids: vec![1],
             })
-            .build()
-            .unwrap();
+            .build();
 
         let err = client.realtime(1).await.err().unwrap();
 
@@ -799,7 +816,7 @@ mod tests {
             .unwrap();
             (first, second)
         });
-        let client = Client::builder()
+        let client = Client::builder(NativeTransport::default())
             .api_url(api_url)
             .realtime_url(ws_url)
             .session(Session {
@@ -808,8 +825,7 @@ mod tests {
                 user_id: 7,
                 monitor_ids: vec![1],
             })
-            .build()
-            .unwrap();
+            .build();
 
         client.realtime(1).await.unwrap();
 
@@ -869,7 +885,9 @@ mod tests {
             ),
         ])
         .await;
-        let client = Client::builder().api_url(url).build().unwrap();
+        let client = Client::builder(NativeTransport::default())
+            .api_url(url)
+            .build();
 
         let err = client.login("me@x.com", "pw").await.unwrap_err();
         let Error::MfaRequired { mfa_token } = err else {
@@ -1023,5 +1041,103 @@ mod tests {
 
         assert!(matches!(err, Error::Api { status: 401, .. }), "{err:?}");
         assert_eq!(server.await.unwrap().len(), 3);
+    }
+}
+
+/// A custom [`HttpTransport`]. Runs on every target, wasm included.
+#[cfg(test)]
+mod custom_transport_tests {
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use super::*;
+
+    /// Replies with canned responses and records requests. Not `Send`,
+    /// which a transport doesn't need to be.
+    #[derive(Default)]
+    struct Fake {
+        replies: RefCell<VecDeque<(u16, &'static str)>>,
+        seen: RefCell<Vec<http::Request<Vec<u8>>>>,
+    }
+
+    impl HttpTransport for Fake {
+        async fn send(&self, req: http::Request<Vec<u8>>) -> Result<http::Response<Vec<u8>>> {
+            self.seen.borrow_mut().push(req);
+            let (status, body) = self
+                .replies
+                .borrow_mut()
+                .pop_front()
+                .ok_or_else(|| Error::Http("no reply left".into()))?;
+            let mut resp = http::Response::new(body.as_bytes().to_vec());
+            *resp.status_mut() = StatusCode::from_u16(status).unwrap();
+            Ok(resp)
+        }
+    }
+
+    /// `Fake` never pends, so polling once is enough.
+    fn now<F: Future>(f: F) -> F::Output {
+        match pin!(f).poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(out) => out,
+            Poll::Pending => panic!("fake transport pended"),
+        }
+    }
+
+    fn client(replies: &[(u16, &'static str)]) -> Client<Fake> {
+        let fake = Fake::default();
+        fake.replies.borrow_mut().extend(replies);
+        Client::builder(fake)
+            .api_url("https://example.test/api")
+            .session(Session {
+                access_token: "old-access".into(),
+                refresh_token: "old-refresh".into(),
+                user_id: 7,
+                monitor_ids: vec![1],
+            })
+            .build()
+    }
+
+    #[test]
+    fn sends_built_request_and_decodes_response() {
+        let client = client(&[(200, r#"{"devices":[]}"#)]);
+
+        let devices = now(client.devices(1)).unwrap();
+
+        assert!(devices.devices.is_empty());
+        let seen = client.transport().seen.borrow();
+        assert_eq!(seen[0].method(), Method::GET);
+        assert_eq!(
+            seen[0].uri(),
+            "https://example.test/api/app/monitors/1/devices/overview"
+        );
+        assert_eq!(seen[0].headers()["Authorization"], "bearer old-access");
+    }
+
+    #[test]
+    fn renews_through_the_transport() {
+        let client = client(&[
+            (401, r#"{"status":"error"}"#),
+            (
+                200,
+                r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
+            ),
+            (200, "{}"),
+        ]);
+
+        now(client.get_json("anything", &[])).unwrap();
+
+        let seen = client.transport().seen.borrow();
+        assert_eq!(seen[1].uri(), "https://example.test/api/renew");
+        assert_eq!(seen[2].headers()["Authorization"], "bearer new-access");
+    }
+
+    #[test]
+    fn transport_errors_are_returned() {
+        let err = now(client(&[]).monitor_status(1)).unwrap_err();
+        assert!(
+            matches!(&err, Error::Http(e) if e.to_string() == "no reply left"),
+            "{err:?}"
+        );
     }
 }

@@ -11,14 +11,21 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy (deny warnings)
-        entry: cargo clippy --all-targets -- -D warnings
+        entry: cargo clippy --all-targets --all-features -- -D warnings
         language: system
         types_or: [rust, toml]
         pass_filenames: false
 
       - id: cargo-clippy-wasi
         name: cargo clippy wasi (deny warnings)
-        entry: cargo clippy --all-targets --target wasm32-wasip2 --no-default-features --features wasi -- -D warnings
+        entry: cargo clippy --lib --tests --example wasi --target wasm32-wasip2 -- -D warnings
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false
+
+      - id: cargo-clippy-wasm-unknown
+        name: cargo clippy wasm32-unknown-unknown (deny warnings)
+        entry: cargo clippy --lib --tests --target wasm32-unknown-unknown -- -D warnings
         language: system
         types_or: [rust, toml]
         pass_filenames: false
@@ -39,7 +46,7 @@ repos:
 
       - id: cargo-test-wasi
         name: cargo test wasi (needs wasmtime)
-        entry: cargo test --lib --target wasm32-wasip2 --no-default-features --features wasi
+        entry: cargo test --lib --target wasm32-wasip2
         language: system
         types_or: [rust, toml]
         pass_filenames: false
@@ -47,14 +54,6 @@ repos:
       - id: cargo-semver-checks
         name: cargo semver-checks
         entry: cargo semver-checks --default-features
-        language: system
-        types_or: [rust, toml]
-        pass_filenames: false
-
-      # Host target: cargo-semver-checks fails to build rustdoc with `--target wasm32-wasip2`.
-      - id: cargo-semver-checks-wasi
-        name: cargo semver-checks wasi
-        entry: cargo semver-checks --only-explicit-features --features wasi
         language: system
         types_or: [rust, toml]
         pass_filenames: false

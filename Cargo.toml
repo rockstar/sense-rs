@@ -1,6 +1,6 @@
 [package]
 name = "sense-rs"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 description = "Unofficial async and blocking client for the Sense energy monitor API"
 license = "MIT"
@@ -14,38 +14,34 @@ categories = ["api-bindings"]
 name = "sense"
 
 [package.metadata.docs.rs]
-# Labels feature-gated items with the feature they need (nightly `doc_cfg`).
+# Labels target-gated items with the platform they need (nightly `doc_cfg`).
 rustdoc-args = ["--cfg", "docsrs"]
-
-[features]
-default = ["native"]
-## reqwest for HTTP, plus the realtime feed and the blocking client. Conflicts with `wasi`.
-native = [
-    "dep:futures-util",
-    "dep:reqwest",
-    "dep:rmpv",
-    "dep:tokio-tungstenite",
-    "tokio/rt-multi-thread",
-    "tokio/net",
-    "tokio/time",
-]
-## wasi-http (via wstd) for HTTP on wasm32-wasip2. No realtime feed or
-## blocking client. Conflicts with `native`.
-wasi = ["dep:form_urlencoded", "dep:wstd"]
+targets = ["x86_64-unknown-linux-gnu", "wasm32-wasip2"]
 
 [dependencies]
-form_urlencoded = { version = "1.2.2", optional = true }
-futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"], optional = true }
+form_urlencoded = "1.2.2"
 http = "1.5.0"
 jiff = { version = "0.2.38", default-features = false, features = ["std"] }
-reqwest = { version = "0.13.5", features = ["form", "query"], optional = true }
-rmpv = { version = "1.3.1", features = ["with-serde"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["sync"] }
-tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"], optional = true }
-wstd = { version = "0.6.8", default-features = false, optional = true }
+
+# `NativeTransport`, the realtime feed and the blocking client.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+reqwest = { version = "0.13.5" }
+rmpv = { version = "1.3.1", features = ["with-serde"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "time"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
+
+# `WasiTransport`.
+[target.'cfg(all(target_os = "wasi", target_env = "p2"))'.dependencies]
+wstd = { version = "0.6.8", default-features = false }
+
+# No system clock on wasm32-unknown-unknown; read it from JavaScript instead.
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+jiff = { version = "0.2.38", default-features = false, features = ["std", "js"] }
 
 [dev-dependencies]
 tokio = { version = "1.53.3", features = ["macros", "io-util"] }
@@ -56,15 +52,3 @@ expect_used = "deny"
 
 [lints.rust]
 missing_docs = "deny"
-
-[[example]]
-name = "realtime"
-required-features = ["native"]
-
-[[example]]
-name = "sync"
-required-features = ["native"]
-
-[[example]]
-name = "wasi"
-required-features = ["wasi"]

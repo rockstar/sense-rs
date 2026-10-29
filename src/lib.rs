@@ -7,10 +7,10 @@
 //! use futures_util::StreamExt;
 //! use sense::models::Scale;
 //! use sense::realtime::RealtimeMessage;
-//! use sense::{Client, Error};
+//! use sense::{Client, Error, NativeTransport};
 //!
 //! # async fn run() -> sense::Result<()> {
-//! let client = Client::new();
+//! let client = Client::new(NativeTransport::new()?);
 //! match client.login("me@example.com", "hunter2").await {
 //!     Ok(_) => {}
 //!     Err(Error::MfaRequired { mfa_token }) => {
@@ -45,34 +45,38 @@
 //!
 //! Response types are in [`models`]; live-feed types are in `realtime`.
 //!
-//! # Features
+//! # Platforms
 //!
-//! Enable exactly one:
+//! A [`Client`] sends requests through an [`HttpTransport`]. Which
+//! transports are built in depends on the target, so there are no cargo
+//! features to pick:
 //!
-//! - `native` (default): HTTP via reqwest on Tokio. Includes the realtime
-//!   feed (`realtime`, [`Client::realtime`]) and the blocking client (`sync`).
-//! - `wasi`: HTTP via [wasi-http](https://github.com/WebAssembly/wasi-http)
-//!   for `wasm32-wasip2` components, using `wstd`. REST endpoints only: no
-//!   realtime feed (wasi has no TLS sockets for `wss://` yet) and no
-//!   blocking client. Request timeouts are left to the host.
+//! - Native targets: [`NativeTransport`] (reqwest on Tokio). Only
+//!   `Client<NativeTransport>` has the realtime feed (`realtime`,
+//!   [`Client::realtime`]), and the blocking client (`sync`) is built on it.
+//! - `wasm32-wasip2`: `WasiTransport`, via
+//!   [wasi-http](https://github.com/WebAssembly/wasi-http) using `wstd`, for
+//!   wasm components. REST endpoints only: no realtime feed (wasi has no TLS
+//!   sockets for `wss://` yet) and no blocking client. Request timeouts are
+//!   left to the host.
+//! - Anything else: implement [`HttpTransport`] yourself.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(unnameable_types, unreachable_pub)]
 
-#[cfg(all(feature = "native", feature = "wasi"))]
-compile_error!(
-    "features `native` and `wasi` are mutually exclusive; use `default-features = false, features = [\"wasi\"]`"
-);
-#[cfg(not(any(feature = "native", feature = "wasi")))]
-compile_error!("enable exactly one of the `native` (default) or `wasi` features");
-
 mod client;
 mod error;
 pub mod models;
-#[cfg(feature = "native")]
+#[cfg(not(target_family = "wasm"))]
 pub mod realtime;
+mod transport;
 
-#[cfg(feature = "native")]
+#[cfg(not(target_family = "wasm"))]
 pub use client::sync;
 pub use client::{Client, ClientBuilder};
 pub use error::{Error, Result};
+pub use transport::HttpTransport;
+#[cfg(not(target_family = "wasm"))]
+pub use transport::NativeTransport;
+#[cfg(all(target_os = "wasi", target_env = "p2"))]
+pub use transport::WasiTransport;

@@ -33,22 +33,23 @@ use tokio::runtime::Runtime;
 use crate::error::{Error, Result};
 use crate::models::*;
 use crate::realtime::RealtimeEvent;
+use crate::transport::NativeTransport;
 
 /// Blocking client for the Sense API. Cheap to clone.
 #[derive(Clone)]
 pub struct Client {
-    inner: crate::Client,
+    inner: crate::Client<NativeTransport>,
     rt: Arc<Runtime>,
 }
 
 impl Client {
     /// A client with default settings and no session.
     pub fn new() -> Result<Self> {
-        Self::from_async(crate::Client::builder().build()?)
+        Self::from_async(crate::Client::new(NativeTransport::new()?))
     }
 
     /// Wrap an async client, e.g. one built with [`crate::Client::builder`].
-    pub fn from_async(inner: crate::Client) -> Result<Self> {
+    pub fn from_async(inner: crate::Client<NativeTransport>) -> Result<Self> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -61,7 +62,7 @@ impl Client {
     }
 
     /// The underlying async client. It shares this client's session.
-    pub fn as_async(&self) -> &crate::Client {
+    pub fn as_async(&self) -> &crate::Client<NativeTransport> {
         &self.inner
     }
 
@@ -214,7 +215,7 @@ mod tests {
             let (sock, _) = listener.accept().unwrap();
             serve(tungstenite::accept(sock).unwrap());
         });
-        let inner = crate::Client::builder()
+        let inner = crate::Client::builder(NativeTransport::default())
             .realtime_url(url)
             .session(Session {
                 access_token: "access".into(),
@@ -222,8 +223,7 @@ mod tests {
                 user_id: 7,
                 monitor_ids: vec![1],
             })
-            .build()
-            .unwrap();
+            .build();
         (Client::from_async(inner).unwrap(), server)
     }
 

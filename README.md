@@ -10,13 +10,16 @@ cargo add sense-rs
 The crate imports as `sense`. The default API is async (Tokio). A blocking API is in `sense::sync`.
 Response types live in `sense::models` and live-feed types in `sense::realtime`.
 
+A `Client` sends requests through an `HttpTransport` you pass in. On native targets that's
+`NativeTransport` (reqwest).
+
 ```rust
 use futures_util::StreamExt;
 use sense::models::Scale;
 use sense::realtime::RealtimeMessage;
-use sense::{Client, Error};
+use sense::{Client, Error, NativeTransport};
 
-let client = Client::new();
+let client = Client::new(NativeTransport::new()?);
 client.login("me@example.com", "password").await?;   // Err(Error::MfaRequired { .. }) → client.login_mfa(..)
 let monitor = client.default_monitor_id().unwrap();
 
@@ -45,16 +48,18 @@ for event in client.realtime(client.default_monitor_id().unwrap())? { /* ... */ 
 
 ## WASI
 
-For `wasm32-wasip2` components, swap the default `native` feature for `wasi`, which sends
+For `wasm32-wasip2` components, build for that target and use `WasiTransport`, which sends
 requests through [wasi-http](https://github.com/WebAssembly/wasi-http) using `wstd`:
 
-```sh
-cargo add sense-rs --no-default-features --features wasi
+```rust
+let client = sense::Client::new(sense::WasiTransport::new());
 ```
 
-The two features are mutually exclusive. `wasi` covers the REST endpoints only: there's no
-realtime feed (wasi has no TLS sockets for `wss://` yet) and no `sense::sync`. Timeouts are left
-to the host. See `examples/wasi.rs`.
+There are no cargo features to set. The right dependencies are picked by target. On wasi, only the
+REST endpoints are covered: there's no realtime feed (wasi has no TLS sockets for `wss://` yet) and
+no `sense::sync`. Timeouts are left to the host. See `examples/wasi.rs`.
+
+On any other platform, implement `sense::HttpTransport` for your own HTTP client.
 
 ## What's covered
 

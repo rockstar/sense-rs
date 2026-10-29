@@ -5,14 +5,14 @@
 
 use futures_util::StreamExt;
 use sense::realtime::RealtimeMessage;
-use sense::{Client, Error};
+use sense::{Client, Error, NativeTransport};
 
 #[tokio::main]
 async fn main() -> sense::Result<()> {
     let email = std::env::var("SENSE_EMAIL").expect("set SENSE_EMAIL");
     let password = std::env::var("SENSE_PASSWORD").expect("set SENSE_PASSWORD");
 
-    let client = Client::new();
+    let client = Client::new(NativeTransport::new()?);
     match client.login(&email, &password).await {
         Ok(_) => {}
         Err(Error::MfaRequired { mfa_token }) => {

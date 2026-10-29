@@ -2,6 +2,7 @@
 ///
 /// `Debug` output hides the MFA token.
 #[derive(thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// Login succeeded but needs a TOTP code. Pass `mfa_token` to `login_mfa`.
     #[error("multi-factor authentication required")]
@@ -36,24 +37,18 @@ pub enum Error {
     #[error("realtime feed error: {0}")]
     Realtime(String),
 
-    /// The HTTP request failed: connection, TLS, or timeout.
-    #[cfg(feature = "native")]
+    /// The [`HttpTransport`](crate::HttpTransport) got no response: e.g. a
+    /// connection, TLS, or timeout failure.
     #[error(transparent)]
-    Http(#[from] reqwest::Error),
-
-    /// The HTTP request failed: the wasi-http host rejected or couldn't
-    /// complete it.
-    #[cfg(feature = "wasi")]
-    #[error(transparent)]
-    Http(wstd::http::Error),
+    Http(Box<dyn std::error::Error + Send + Sync>),
 
     /// The blocking client couldn't start its Tokio runtime.
-    #[cfg(feature = "native")]
+    #[cfg(not(target_family = "wasm"))]
     #[error("failed to start runtime: {0}")]
     Runtime(#[source] std::io::Error),
 
     /// The realtime websocket failed.
-    #[cfg(feature = "native")]
+    #[cfg(not(target_family = "wasm"))]
     #[error(transparent)]
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
 
@@ -79,16 +74,23 @@ impl std::fmt::Debug for Error {
             Error::Timeout(d) => f.debug_tuple("Timeout").field(d).finish(),
             Error::Realtime(s) => f.debug_tuple("Realtime").field(s).finish(),
             Error::Http(e) => f.debug_tuple("Http").field(e).finish(),
-            #[cfg(feature = "native")]
+            #[cfg(not(target_family = "wasm"))]
             Error::Runtime(e) => f.debug_tuple("Runtime").field(e).finish(),
-            #[cfg(feature = "native")]
+            #[cfg(not(target_family = "wasm"))]
             Error::WebSocket(e) => f.debug_tuple("WebSocket").field(e).finish(),
             Error::Decode(s) => f.debug_tuple("Decode").field(s).finish(),
         }
     }
 }
 
-#[cfg(feature = "native")]
+#[cfg(not(target_family = "wasm"))]
+impl From<reqwest::Error> for Error {
+    fn from(e: reqwest::Error) -> Self {
+        Error::Http(Box::new(e))
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
 impl From<tokio_tungstenite::tungstenite::Error> for Error {
     fn from(e: tokio_tungstenite::tungstenite::Error) -> Self {
         Error::WebSocket(Box::new(e))
