@@ -1,3 +1,8 @@
 # Runs `cargo test --target wasm32-wasip2` under wasmtime with wasi-http.
 [target.wasm32-wasip2]
 runner = "wasmtime run -S http"
+
+# Runs `cargo test --target wasm32-unknown-unknown` under Node. Install the
+# runner with `cargo install wasm-bindgen-cli --version <wasm-bindgen in Cargo.lock>`.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"

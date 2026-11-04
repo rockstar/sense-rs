@@ -20,6 +20,11 @@ jobs:
           targets: wasm32-wasip2, wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: bytecodealliance/actions/wasmtime/setup@v1
+      # wasm-bindgen-test-runner must match the wasm-bindgen version in Cargo.lock.
+      - name: Install wasm-bindgen-test-runner
+        run: |
+          version=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/"/,"",$3); print $3}' Cargo.lock)
+          cargo install wasm-bindgen-cli --locked --version "$version"
       - run: cargo fmt --all -- --check
       # The crate has no features; this guards against adding non-additive ones.
       - run: cargo clippy --all-targets --all-features -- -D warnings
@@ -31,6 +36,8 @@ jobs:
       - run: cargo test --doc
       # Runs under wasmtime via the runner in .cargo/config.toml. Doctests are native-only.
       - run: cargo test --lib --target wasm32-wasip2
+      # Runs under Node via the runner in .cargo/config.toml.
+      - run: cargo test --lib --target wasm32-unknown-unknown
       # Default features only: the 0.2.x baseline can't build with `--all-features`.
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:

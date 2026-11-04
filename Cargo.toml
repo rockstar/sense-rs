@@ -43,6 +43,9 @@ wstd = { version = "0.6.8", default-features = false }
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 jiff = { version = "0.2.38", default-features = false, features = ["std", "js"] }
 
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3.80"
+
 [dev-dependencies]
 tokio = { version = "1.53.3", features = ["macros", "io-util"] }
 

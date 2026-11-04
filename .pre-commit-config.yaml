@@ -51,6 +51,13 @@ repos:
         types_or: [rust, toml]
         pass_filenames: false
 
+      - id: cargo-test-wasm-unknown
+        name: cargo test wasm32-unknown-unknown (needs node + wasm-bindgen-cli)
+        entry: cargo test --lib --target wasm32-unknown-unknown
+        language: system
+        types_or: [rust, toml]
+        pass_filenames: false
+
       - id: cargo-semver-checks
         name: cargo semver-checks
         entry: cargo semver-checks --default-features

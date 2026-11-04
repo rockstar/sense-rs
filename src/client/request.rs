@@ -48,6 +48,9 @@ fn urlencode<V: AsRef<str>>(pairs: &[(&str, V)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Runs these under Node via wasm-bindgen-test-runner.
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     #[test]
     fn login_form() {

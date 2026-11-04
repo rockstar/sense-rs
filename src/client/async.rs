@@ -1053,6 +1053,9 @@ mod custom_transport_tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
+    // Runs these under Node via wasm-bindgen-test-runner.
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
 
     /// Replies with canned responses and records requests. Not `Send`,
     /// which a transport doesn't need to be.
@@ -1130,6 +1133,47 @@ mod custom_transport_tests {
         let seen = client.transport().seen.borrow();
         assert_eq!(seen[1].uri(), "https://example.test/api/renew");
         assert_eq!(seen[2].headers()["Authorization"], "bearer new-access");
+    }
+
+    /// Reads the clock, which needs `jiff/js` on wasm32-unknown-unknown.
+    #[test]
+    fn trends_without_start_sends_now() {
+        let client = client(&[(200, "{}")]);
+
+        now(client.trends(1, Scale::Day, None)).unwrap();
+
+        let seen = client.transport().seen.borrow();
+        let query = seen[0].uri().query().unwrap_or_default();
+        let start = query
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("start="))
+            .unwrap_or_else(|| panic!("{query}"))
+            .replace("%3A", ":");
+        let sent: jiff::Timestamp = start.parse().unwrap();
+        let age = jiff::Timestamp::now().as_second() - sent.as_second();
+        assert!((0..60).contains(&age), "{start}");
+    }
+
+    /// Reads the clock, which needs `jiff/js` on wasm32-unknown-unknown.
+    #[test]
+    fn login_mfa_sends_client_time() {
+        let client = client(&[(
+            200,
+            r#"{"user_id":9,"access_token":"a","refresh_token":"r","monitors":[]}"#,
+        )]);
+
+        now(client.login_mfa("tok", "123456")).unwrap();
+
+        let seen = client.transport().seen.borrow();
+        let body = String::from_utf8_lossy(seen[0].body()).into_owned();
+        let sent = body
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("client_time="))
+            .unwrap_or_else(|| panic!("{body}"))
+            .replace("%3A", ":");
+        let sent: jiff::Timestamp = sent.parse().unwrap();
+        let age = jiff::Timestamp::now().as_second() - sent.as_second();
+        assert!((0..60).contains(&age), "{body}");
     }
 
     #[test]
