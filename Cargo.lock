@@ -1282,6 +1282,7 @@ dependencies = [
  "futures-util",
  "http",
  "jiff",
+ "js-sys",
  "reqwest",
  "rmpv",
  "serde",
@@ -1289,7 +1290,10 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
+ "web-sys",
  "wstd",
 ]
 

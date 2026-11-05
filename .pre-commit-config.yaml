@@ -25,7 +25,7 @@ repos:
 
       - id: cargo-clippy-wasm-unknown
         name: cargo clippy wasm32-unknown-unknown (deny warnings)
-        entry: cargo clippy --lib --tests --target wasm32-unknown-unknown -- -D warnings
+        entry: cargo clippy --lib --tests --example fetch --target wasm32-unknown-unknown -- -D warnings
         language: system
         types_or: [rust, toml]
         pass_filenames: false

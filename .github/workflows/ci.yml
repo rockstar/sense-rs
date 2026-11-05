@@ -31,7 +31,7 @@ jobs:
       # The native examples don't build for wasm.
       - run: cargo clippy --lib --tests --example wasi --target wasm32-wasip2 -- -D warnings
       # Core only: no built-in transport, clock read from JavaScript.
-      - run: cargo clippy --lib --tests --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo clippy --lib --tests --example fetch --target wasm32-unknown-unknown -- -D warnings
       - run: cargo test --all-targets
       - run: cargo test --doc
       # Runs under wasmtime via the runner in .cargo/config.toml. Doctests are native-only.

@@ -59,7 +59,8 @@ There are no cargo features to set. The right dependencies are picked by target.
 REST endpoints are covered: there's no realtime feed (wasi has no TLS sockets for `wss://` yet) and
 no `sense::sync`. Timeouts are left to the host. See `examples/wasi.rs`.
 
-On any other platform, implement `sense::HttpTransport` for your own HTTP client.
+On any other platform, implement `sense::HttpTransport` for your own HTTP client. `examples/fetch.rs`
+builds one on JavaScript's `fetch` for `wasm32-unknown-unknown` and runs it under Node.
 
 ## What's covered
 

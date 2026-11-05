@@ -59,7 +59,8 @@
 //!   wasm components. REST endpoints only: no realtime feed (wasi has no TLS
 //!   sockets for `wss://` yet) and no blocking client. Request timeouts are
 //!   left to the host.
-//! - Anything else: implement [`HttpTransport`] yourself.
+//! - Anything else: implement [`HttpTransport`] yourself. `examples/fetch.rs`
+//!   does it with JavaScript's `fetch` on `wasm32-unknown-unknown`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(unnameable_types, unreachable_pub)]
