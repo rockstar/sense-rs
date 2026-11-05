@@ -598,6 +598,23 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn bad_frame_does_not_end_feed() {
+        let url = ws_server(|mut ws| async move {
+            // 0xc1 is never valid msgpack.
+            ws.send(Message::Binary(vec![0xc1].into())).await.unwrap();
+            ws.send(Message::Binary(frame("hello", map(vec![])).into()))
+                .await
+                .unwrap();
+            ws.close(None).await.unwrap();
+        })
+        .await;
+        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        assert!(matches!(feed.next().await, Some(Err(Error::Decode(_)))));
+        let ev = feed.next().await.unwrap().unwrap();
+        assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
+    }
+
     #[test]
     fn encodes_start_command() {
         let mut expected = vec![0xb6]; // fixstr, 22 bytes
