@@ -217,12 +217,7 @@ mod tests {
         });
         let inner = crate::Client::builder(NativeTransport::default())
             .realtime_url(url)
-            .session(Session {
-                access_token: "access".into(),
-                refresh_token: "refresh".into(),
-                user_id: 7,
-                monitor_ids: vec![1],
-            })
+            .session(test_session())
             .build();
         (Client::from_async(inner).unwrap(), server)
     }

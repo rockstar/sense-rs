@@ -599,12 +599,7 @@ mod tests {
     fn client_for(url: String) -> Client<NativeTransport> {
         Client::builder(NativeTransport::default())
             .api_url(url)
-            .session(Session {
-                access_token: "old-access".into(),
-                refresh_token: "old-refresh".into(),
-                user_id: 7,
-                monitor_ids: vec![1],
-            })
+            .session(test_session())
             .build()
     }
 
@@ -702,12 +697,7 @@ mod tests {
         let (ws_url, ws) = mock_server(vec![(500, r#"{"status":"error"}"#)]).await;
         let client = Client::builder(NativeTransport::default())
             .realtime_url(ws_url.replacen("http", "ws", 1))
-            .session(Session {
-                access_token: "old-access".into(),
-                refresh_token: "old-refresh".into(),
-                user_id: 7,
-                monitor_ids: vec![1],
-            })
+            .session(test_session())
             .build();
 
         let err = client.realtime(1).await.err().unwrap();
@@ -836,12 +826,7 @@ mod tests {
         let client = Client::builder(NativeTransport::default())
             .api_url(api_url)
             .realtime_url(ws_url)
-            .session(Session {
-                access_token: "old-access".into(),
-                refresh_token: "old-refresh".into(),
-                user_id: 7,
-                monitor_ids: vec![1],
-            })
+            .session(test_session())
             .build();
 
         client.realtime(1).await.unwrap();
@@ -917,17 +902,6 @@ mod tests {
         assert!(seen[0].line.starts_with("POST /authenticate "));
         assert_eq!(seen[0].body, "email=me%40x.com&password=pw");
         assert!(seen[1].line.starts_with("POST /authenticate/mfa "));
-        let client_time = seen[1]
-            .body
-            .strip_prefix("mfa_token=mfa-1&totp=123456&client_time=")
-            .unwrap_or_else(|| panic!("{}", seen[1].body))
-            .replace("%3A", ":");
-        // Whole seconds in UTC, e.g. 2009-02-13T23:31:30Z.
-        assert_eq!(client_time.len(), 20, "{client_time}");
-        assert!(client_time.ends_with('Z'), "{client_time}");
-        let sent: jiff::Timestamp = client_time.parse().unwrap();
-        let age = jiff::Timestamp::now().as_second() - sent.as_second();
-        assert!((0..60).contains(&age), "{client_time}");
         let session = client.session().unwrap();
         assert_eq!(session.access_token, "a");
         assert_eq!(session.user_id, 9);
@@ -1018,21 +992,6 @@ mod tests {
         assert_eq!(target(&seen[0]), "/api/app/monitors/1/devices/d");
     }
 
-    #[tokio::test]
-    async fn trends_without_start_sends_now() {
-        let (url, server) = mock_server(vec![(200, "{}")]).await;
-        client_for(url).trends(1, Scale::Day, None).await.unwrap();
-
-        let seen = server.await.unwrap();
-        let start = target(&seen[0])
-            .strip_prefix("/app/history/trends?monitor_id=1&scale=DAY&start=")
-            .unwrap_or_else(|| panic!("{}", seen[0].line))
-            .replace("%3A", ":");
-        let sent: jiff::Timestamp = start.parse().unwrap();
-        let age = jiff::Timestamp::now().as_second() - sent.as_second();
-        assert!((0..60).contains(&age), "{start}");
-    }
-
     #[test]
     fn scale_and_granularity_display() {
         let scales = [
@@ -1109,12 +1068,7 @@ mod custom_transport_tests {
         fake.replies.borrow_mut().extend(replies);
         Client::builder(fake)
             .api_url("https://example.test/api")
-            .session(Session {
-                access_token: "old-access".into(),
-                refresh_token: "old-refresh".into(),
-                user_id: 7,
-                monitor_ids: vec![1],
-            })
+            .session(test_session())
             .build()
     }
 
@@ -1201,6 +1155,9 @@ mod custom_transport_tests {
             .find_map(|kv| kv.strip_prefix("client_time="))
             .unwrap_or_else(|| panic!("{body}"))
             .replace("%3A", ":");
+        // Whole seconds in UTC, e.g. 2009-02-13T23:31:30Z.
+        assert_eq!(sent.len(), 20, "{body}");
+        assert!(sent.ends_with('Z'), "{body}");
         let sent: jiff::Timestamp = sent.parse().unwrap();
         let age = jiff::Timestamp::now().as_second() - sent.as_second();
         assert!((0..60).contains(&age), "{body}");

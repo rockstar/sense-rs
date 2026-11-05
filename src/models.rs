@@ -72,6 +72,17 @@ pub struct Session {
     pub monitor_ids: Vec<i64>,
 }
 
+/// A logged-in session shared by the client tests.
+#[cfg(test)]
+pub(crate) fn test_session() -> Session {
+    Session {
+        access_token: "old-access".into(),
+        refresh_token: "old-refresh".into(),
+        user_id: 7,
+        monitor_ids: vec![1],
+    }
+}
+
 const REDACTED: &str = "<redacted>";
 
 impl fmt::Debug for AuthResponse {
