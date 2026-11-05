@@ -412,7 +412,7 @@ impl<T: HttpTransport> Client<T> {
         form: Option<&[(&str, &str)]>,
         access_token: Option<&str>,
     ) -> Result<(StatusCode, Vec<u8>)> {
-        let url = format!("{}{path}", self.inner.api_url);
+        let url = format!("{}{}", self.inner.api_url, path.trim_start_matches('/'));
         let req = build_request(method, &url, query, form, access_token)?;
         let resp = self.inner.transport.send(req).await?;
         let status = resp.status();
@@ -1132,6 +1132,19 @@ mod custom_transport_tests {
             "https://example.test/api/app/monitors/1/devices/overview"
         );
         assert_eq!(seen[0].headers()["Authorization"], "bearer old-access");
+    }
+
+    #[test]
+    fn get_json_ignores_leading_slash() {
+        let client = client(&[(200, "{}")]);
+
+        now(client.get_json("/app/monitors/1/rate_zones", &[])).unwrap();
+
+        let seen = client.transport().seen.borrow();
+        assert_eq!(
+            seen[0].uri(),
+            "https://example.test/api/app/monitors/1/rate_zones"
+        );
     }
 
     #[test]
