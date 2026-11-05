@@ -17,7 +17,7 @@ pub(crate) fn build_request(
 ) -> Result<http::Request<Vec<u8>>> {
     let mut url = url.to_string();
     if !query.is_empty() {
-        url.push('?');
+        url.push(if url.contains('?') { '&' } else { '?' });
         url.push_str(&urlencode(query));
     }
     let mut req = http::Request::builder()

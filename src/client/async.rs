@@ -1102,6 +1102,16 @@ mod custom_transport_tests {
     }
 
     #[test]
+    fn get_json_appends_to_existing_query() {
+        let client = client(&[(200, "{}")]);
+
+        now(client.get_json("app/x?a=1", &[("b", "2".to_string())])).unwrap();
+
+        let seen = client.transport().seen.borrow();
+        assert_eq!(seen[0].uri(), "https://example.test/api/app/x?a=1&b=2");
+    }
+
+    #[test]
     fn renews_through_the_transport() {
         let client = client(&[
             (401, r#"{"status":"error"}"#),
