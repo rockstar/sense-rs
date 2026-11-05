@@ -429,6 +429,7 @@ fn from_msgpack<T: serde::de::DeserializeOwned>(v: rmpv::Value) -> Result<T> {
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_macros, reason = "tests are allowed to panic")]
 mod tests {
     use super::*;
     use rmpv::Value;

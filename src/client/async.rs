@@ -478,6 +478,7 @@ pub(crate) fn api_error(status: StatusCode, body: &[u8]) -> Error {
 
 #[cfg(test)]
 #[cfg(not(target_family = "wasm"))]
+#[expect(clippy::disallowed_macros, reason = "tests are allowed to panic")]
 mod tests {
     use super::*;
     use crate::client::PROTOCOL_VERSION;
@@ -1022,6 +1023,7 @@ mod tests {
 
 /// A custom [`HttpTransport`]. Runs on every target, wasm included.
 #[cfg(test)]
+#[expect(clippy::disallowed_macros, reason = "tests are allowed to panic")]
 mod custom_transport_tests {
     use std::cell::RefCell;
     use std::collections::VecDeque;

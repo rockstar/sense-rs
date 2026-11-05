@@ -197,6 +197,7 @@ impl Iterator for RealtimeFeed {
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_macros, reason = "tests are allowed to panic")]
 mod tests {
     use super::*;
     use crate::realtime::RealtimeMessage;

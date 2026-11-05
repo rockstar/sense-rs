@@ -46,6 +46,7 @@ fn urlencode<V: AsRef<str>>(pairs: &[(&str, V)]) -> String {
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_macros, reason = "tests are allowed to panic")]
 mod tests {
     use super::*;
     // Runs these under Node via wasm-bindgen-test-runner.

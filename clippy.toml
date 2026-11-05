@@ -1,2 +1,7 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+disallowed-macros = [
+    { path = "std::assert", reason = "return an error instead; use debug_assert! for invariants" },
+    { path = "std::assert_eq", reason = "return an error instead; use debug_assert_eq! for invariants" },
+    { path = "std::assert_ne", reason = "return an error instead; use debug_assert_ne! for invariants" },
+]

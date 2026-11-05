@@ -101,6 +101,7 @@ impl From<tokio_tungstenite::tungstenite::Error> for Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(test)]
+#[expect(clippy::disallowed_macros, reason = "tests are allowed to panic")]
 mod tests {
     use super::*;
     // Runs these under Node via wasm-bindgen-test-runner.
