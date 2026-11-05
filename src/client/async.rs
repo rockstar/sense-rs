@@ -748,6 +748,23 @@ mod tests {
         assert_eq!(session.refresh_token, "new-refresh");
     }
 
+    #[tokio::test]
+    async fn rejected_renew_returns_401_and_keeps_session() {
+        let (url, server) = mock_server(vec![EXPIRED, (401, r#"{"status":"error"}"#)]).await;
+        let client = client_for(url);
+
+        let err = client.monitor_status(1).await.unwrap_err();
+        assert!(matches!(err, Error::Api { status: 401, .. }), "{err:?}");
+
+        let seen = server.await.unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(seen[1].line.starts_with("POST /renew "));
+
+        let session = client.session().unwrap();
+        assert_eq!(session.access_token, "old-access");
+        assert_eq!(session.refresh_token, "old-refresh");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_401s_renew_once() {
         use std::sync::atomic::{AtomicUsize, Ordering};
