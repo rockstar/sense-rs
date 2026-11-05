@@ -66,7 +66,9 @@ builds one on JavaScript's `fetch` for `wasm32-unknown-unknown` and runs it unde
 
 - Auth: `login`, `login_mfa`, `renew`, `logout`. Expired tokens renew automatically on a 401.
   Save `client.session()` and restore it with `set_session` to skip logging in.
-  Renewals replace both tokens, so save the session again before exiting.
+  Renewals replace both tokens. Save again whenever `client.session()` differs from what you
+  saved, after each call rather than on exit, since a killed process never exits cleanly.
+  `examples/realtime.rs` shows how.
 - Monitors: `monitor_overview`, `monitor_status`
 - Devices: `devices`, `device`
 - History: `trends`, `usage`, `cumulative`
