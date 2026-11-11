@@ -6,9 +6,10 @@ use futures_util::{Sink, Stream};
 use reqwest_websocket::{HandshakeError, Message, Upgrade};
 
 use super::{HttpTransport, WebSocketFrame, WebSocketTransport};
-use crate::client::CONNECT_TIMEOUT;
 use crate::error::{Error, Result};
 
+/// How long establishing a connection (HTTP or websocket) may take.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// [`HttpTransport`] and [`WebSocketTransport`] backed by reqwest, on Tokio.
