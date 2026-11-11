@@ -49,18 +49,18 @@
 //!
 //! # Platforms
 //!
-//! A [`Client`] sends requests through an [`HttpTransport`]. Which
-//! transports are built in depends on the target, so there are no cargo
-//! features to pick:
+//! A [`Client`] sends requests through an [`HttpTransport`], and opens the
+//! realtime feed (`realtime`, [`Client::realtime`]) through a
+//! `WebSocketTransport`. Which transports are built in depends on the
+//! target, so there are no cargo features to pick:
 //!
-//! - Native targets: [`NativeTransport`] (reqwest on Tokio). Only
-//!   `Client<NativeTransport>` has the realtime feed (`realtime`,
-//!   [`Client::realtime`]), and the blocking client (`sync`) is built on it.
+//! - Native targets: [`NativeTransport`] (reqwest on Tokio) does both, through
+//!   one `reqwest::Client`. The blocking client (`sync`) is built on it.
 //! - `wasm32-wasip2`: `WasiTransport`, via
 //!   [wasi-http](https://github.com/WebAssembly/wasi-http) using `wstd`, for
 //!   wasm components. REST endpoints only: no realtime feed (wasi has no TLS
-//!   sockets for `wss://` yet) and no blocking client. Request timeouts are
-//!   left to the host.
+//!   sockets for `wss://` yet, and the feed's timers need Tokio) and no
+//!   blocking client. Request timeouts are left to the host.
 //! - Anything else: implement [`HttpTransport`] yourself. `examples/fetch.rs`
 //!   does it with JavaScript's `fetch` on `wasm32-unknown-unknown`.
 
@@ -79,7 +79,7 @@ pub use client::sync;
 pub use client::{Client, ClientBuilder};
 pub use error::{Error, Result};
 pub use transport::HttpTransport;
-#[cfg(not(target_family = "wasm"))]
-pub use transport::NativeTransport;
 #[cfg(all(target_os = "wasi", target_env = "p2"))]
 pub use transport::WasiTransport;
+#[cfg(not(target_family = "wasm"))]
+pub use transport::{NativeTransport, NativeWebSocket, WebSocketFrame, WebSocketTransport};

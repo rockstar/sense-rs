@@ -10,17 +10,14 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures_util::{SinkExt, Stream, StreamExt};
+use http::HeaderValue;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpStream;
 use tokio::time::{Instant, Sleep};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::tungstenite::{self, Message};
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::client::{CONNECT_TIMEOUT, PROTOCOL_VERSION, api_error};
+use crate::client::{PROTOCOL_VERSION, api_error};
 use crate::error::{Error, Result};
 use crate::models::{ConnectionState, null_as_default};
+use crate::transport::{NativeTransport, WebSocketFrame, WebSocketTransport};
 
 /// How long the feed may be silent before it's treated as dead.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -38,8 +35,10 @@ const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// If the server rejects the token mid-feed, the stream yields
 /// [`Error::Api`] with status 401. Call [`Client::renew`](crate::Client::renew)
 /// before reconnecting, or the new feed will be rejected too.
-pub struct RealtimeFeed {
-    ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+///
+/// `T` is the [`WebSocketTransport`] that opened the feed.
+pub struct RealtimeFeed<T: WebSocketTransport = NativeTransport> {
+    ws: T::Socket,
     idle_timeout: Duration,
     /// Fires at the ping time, then (after a ping) at the idle deadline.
     timer: Pin<Box<Sleep>>,
@@ -47,9 +46,11 @@ pub struct RealtimeFeed {
     done: bool,
 }
 
-impl RealtimeFeed {
-    pub(crate) async fn connect(url: &str, access_token: &str) -> Result<Self> {
-        let mut req = url.into_client_request()?;
+impl<T: WebSocketTransport> RealtimeFeed<T> {
+    pub(crate) async fn connect(transport: &T, url: &str, access_token: &str) -> Result<Self> {
+        let mut req = http::Request::get(url)
+            .body(())
+            .map_err(|e| Error::InvalidArgument(format!("bad realtime url {url:?}: {e}")))?;
         let headers = req.headers_mut();
         headers.insert(
             "Authorization",
@@ -63,19 +64,9 @@ impl RealtimeFeed {
             HeaderValue::from_static(PROTOCOL_VERSION),
         );
 
-        let connect = tokio_tungstenite::connect_async(req);
-        let ws = match tokio::time::timeout(CONNECT_TIMEOUT, connect)
-            .await
-            .map_err(|_| Error::Timeout(CONNECT_TIMEOUT))?
-        {
-            Ok((ws, _)) => ws,
-            Err(tungstenite::Error::Http(resp)) => {
-                return Err(api_error(
-                    resp.status(),
-                    resp.body().as_deref().unwrap_or_default(),
-                ));
-            }
-            Err(e) => return Err(e.into()),
+        let ws = match transport.connect(req).await? {
+            Ok(ws) => ws,
+            Err(resp) => return Err(api_error(resp.status(), resp.body())),
         };
         let now = Instant::now();
         let mut feed = RealtimeFeed {
@@ -122,18 +113,16 @@ impl RealtimeFeed {
             .unwrap_or_default()
             .as_secs();
         let frame = encode_command(command, epoch);
-        self.ws.send(Message::Binary(frame.into())).await?;
-        Ok(())
+        self.ws.send(WebSocketFrame::Binary(frame)).await
     }
 
     /// Close the connection.
     pub async fn close(mut self) -> Result<()> {
-        self.ws.close(None).await?;
-        Ok(())
+        self.ws.close().await
     }
 }
 
-impl Stream for RealtimeFeed {
+impl<T: WebSocketTransport> Stream for RealtimeFeed<T> {
     type Item = Result<RealtimeEvent>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -150,18 +139,18 @@ impl Stream for RealtimeFeed {
                     self.done = true;
                     return Poll::Ready(None);
                 }
-                Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e.into()))),
+                Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
                 Poll::Ready(Some(Ok(msg))) => msg,
             };
             // Any frame, including a pong, proves the connection is alive.
             self.mark_alive();
             match msg {
-                Message::Binary(bytes) => return Poll::Ready(Some(decode_frame(&bytes))),
-                Message::Close(_) => {
+                WebSocketFrame::Binary(bytes) => return Poll::Ready(Some(decode_frame(&bytes))),
+                WebSocketFrame::Close => {
                     self.done = true;
                     return Poll::Ready(None);
                 }
-                // Pings are answered by tungstenite; nothing else is expected.
+                // The socket answers pings itself.
                 _ => continue,
             }
         }
@@ -174,14 +163,14 @@ impl Stream for RealtimeFeed {
             }
             match self.ws.poll_ready_unpin(cx) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e.into()))),
+                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
                 Poll::Ready(Ok(())) => {}
             }
-            if let Err(e) = self.ws.start_send_unpin(Message::Ping(Default::default())) {
-                return Poll::Ready(Some(Err(e.into())));
+            if let Err(e) = self.ws.start_send_unpin(WebSocketFrame::Ping) {
+                return Poll::Ready(Some(Err(e)));
             }
             if let Poll::Ready(Err(e)) = self.ws.poll_flush_unpin(cx) {
-                return Poll::Ready(Some(Err(e.into())));
+                return Poll::Ready(Some(Err(e)));
             }
             self.pinged = true;
             // Count from the ping, not the last frame: a late read must still
@@ -433,6 +422,9 @@ fn from_msgpack<T: serde::de::DeserializeOwned>(v: rmpv::Value) -> Result<T> {
 mod tests {
     use super::*;
     use rmpv::Value;
+    use tokio::net::TcpStream;
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::tungstenite::Message;
 
     fn frame(kind: &str, payload: Value) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -467,6 +459,10 @@ mod tests {
         url
     }
 
+    async fn open(url: &str, token: &str) -> Result<RealtimeFeed> {
+        RealtimeFeed::connect(&NativeTransport::default(), url, token).await
+    }
+
     const SHORT: Duration = Duration::from_millis(200);
 
     #[tokio::test]
@@ -477,7 +473,7 @@ mod tests {
             std::future::pending::<()>().await;
         })
         .await;
-        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let mut feed = open(&url, "token").await.unwrap();
         feed.set_idle_timeout(SHORT);
 
         let started = std::time::Instant::now();
@@ -494,7 +490,7 @@ mod tests {
     async fn quiet_but_alive_connection_stays_open() {
         // Sends no data but keeps reading, so tungstenite answers our pings.
         let url = ws_server(|mut ws| async move { while ws.next().await.is_some() {} }).await;
-        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let mut feed = open(&url, "token").await.unwrap();
         feed.set_idle_timeout(SHORT);
 
         let waited = tokio::time::timeout(SHORT * 4, feed.next()).await;
@@ -507,7 +503,7 @@ mod tests {
     #[tokio::test]
     async fn quiet_connection_read_late_stays_open() {
         let url = ws_server(|mut ws| async move { while ws.next().await.is_some() {} }).await;
-        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let mut feed = open(&url, "token").await.unwrap();
         feed.set_idle_timeout(SHORT);
 
         // Nobody polls the feed past the whole idle timeout.
@@ -520,9 +516,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_timeout_does_not_end_quiet_feed() {
+        let url = ws_server(|mut ws| async move { while ws.next().await.is_some() {} }).await;
+        let client = reqwest::Client::builder().timeout(SHORT).build().unwrap();
+        let mut feed = RealtimeFeed::connect(&NativeTransport::from(client), &url, "token")
+            .await
+            .unwrap();
+        feed.set_idle_timeout(SHORT * 2);
+
+        let waited = tokio::time::timeout(SHORT * 4, feed.next()).await;
+        assert!(
+            waited.is_err(),
+            "expected no event and no timeout, got {waited:?}"
+        );
+    }
+
+    #[tokio::test]
+    // The handshake callback's error type is fixed by tungstenite.
+    #[allow(clippy::result_large_err)]
+    async fn connects_through_the_clients_proxy() {
+        use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+
+        // Stands in for the proxy: accepts the forwarded handshake itself.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_url = format!("http://{}", listener.local_addr().unwrap());
+        let proxy = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut target = None;
+            let _ws = tokio_tungstenite::accept_hdr_async(sock, |req: &Request, resp: Response| {
+                target = Some(req.uri().to_string());
+                Ok(resp)
+            })
+            .await
+            .unwrap();
+            target
+        });
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all(proxy_url).unwrap())
+            .build()
+            .unwrap();
+
+        RealtimeFeed::connect(
+            &NativeTransport::from(client),
+            "ws://sense.invalid/feed",
+            "token",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            proxy.await.unwrap().as_deref(),
+            Some("http://sense.invalid/feed")
+        );
+    }
+
+    #[tokio::test]
     async fn max_idle_timeout_does_not_panic() {
         let url = ws_server(|mut ws| async move { while ws.next().await.is_some() {} }).await;
-        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let mut feed = open(&url, "token").await.unwrap();
         feed.set_idle_timeout(Duration::MAX);
 
         let waited = tokio::time::timeout(SHORT, feed.next()).await;
@@ -540,7 +591,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let _feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let _feed = open(&url, "token").await.unwrap();
 
         let Message::Binary(bytes) = rx.await.unwrap() else {
             panic!("expected a binary frame")
@@ -564,7 +615,7 @@ mod tests {
             let _ = tx.send(ws.next().await.unwrap().unwrap());
         })
         .await;
-        let feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let feed = open(&url, "token").await.unwrap();
         feed.close().await.unwrap();
 
         let msg = rx.await.unwrap();
@@ -573,10 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn bad_token_is_an_error_not_a_panic() {
-        let err = RealtimeFeed::connect("ws://127.0.0.1:1/", "token\n")
-            .await
-            .err()
-            .unwrap();
+        let err = open("ws://127.0.0.1:1/", "token\n").await.err().unwrap();
         assert!(matches!(err, Error::InvalidArgument(_)), "{err:?}");
     }
 
@@ -589,7 +637,7 @@ mod tests {
             ws.close(None).await.unwrap();
         })
         .await;
-        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let mut feed = open(&url, "token").await.unwrap();
         let ev = feed.next().await.unwrap().unwrap();
         assert!(matches!(ev.message, RealtimeMessage::Hello(_)));
         assert!(
@@ -609,7 +657,7 @@ mod tests {
             ws.close(None).await.unwrap();
         })
         .await;
-        let mut feed = RealtimeFeed::connect(&url, "token").await.unwrap();
+        let mut feed = open(&url, "token").await.unwrap();
         assert!(matches!(feed.next().await, Some(Err(Error::Decode(_)))));
         let ev = feed.next().await.unwrap().unwrap();
         assert!(matches!(ev.message, RealtimeMessage::Hello(_)));

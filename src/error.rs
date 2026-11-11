@@ -28,8 +28,8 @@ pub enum Error {
         reason: Option<String>,
     },
 
-    /// The realtime feed received nothing, not even a pong, for this long,
-    /// or the handshake took too long. Open a new feed.
+    /// The realtime feed received nothing, not even a pong, for this long.
+    /// Open a new feed.
     #[error("realtime feed timed out after {0:?}")]
     Timeout(std::time::Duration),
 
@@ -47,10 +47,11 @@ pub enum Error {
     #[error("failed to start runtime: {0}")]
     Runtime(#[source] std::io::Error),
 
-    /// The realtime websocket failed.
-    #[cfg(not(target_family = "wasm"))]
+    /// The realtime websocket failed, or the
+    /// [`WebSocketTransport`](crate::WebSocketTransport) got no answer to the
+    /// handshake.
     #[error(transparent)]
-    WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
+    WebSocket(Box<dyn std::error::Error + Send + Sync>),
 
     /// A response or feed message didn't match the expected shape.
     #[error("failed to decode response: {0}")]
@@ -76,7 +77,6 @@ impl std::fmt::Debug for Error {
             Error::Http(e) => f.debug_tuple("Http").field(e).finish(),
             #[cfg(not(target_family = "wasm"))]
             Error::Runtime(e) => f.debug_tuple("Runtime").field(e).finish(),
-            #[cfg(not(target_family = "wasm"))]
             Error::WebSocket(e) => f.debug_tuple("WebSocket").field(e).finish(),
             Error::Decode(s) => f.debug_tuple("Decode").field(s).finish(),
         }
@@ -87,13 +87,6 @@ impl std::fmt::Debug for Error {
 impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Self {
         Error::Http(Box::new(e))
-    }
-}
-
-#[cfg(not(target_family = "wasm"))]
-impl From<tokio_tungstenite::tungstenite::Error> for Error {
-    fn from(e: tokio_tungstenite::tungstenite::Error) -> Self {
-        Error::WebSocket(Box::new(e))
     }
 }
 

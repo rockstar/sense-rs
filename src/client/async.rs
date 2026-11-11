@@ -11,7 +11,7 @@ use crate::models::*;
 use crate::realtime::RealtimeFeed;
 use crate::transport::HttpTransport;
 #[cfg(not(target_family = "wasm"))]
-use crate::transport::NativeTransport;
+use crate::transport::WebSocketTransport;
 
 const DEFAULT_API_URL: &str = "https://api.sense.com/apiservice/api/v1/";
 const DEFAULT_REALTIME_URL: &str = "wss://clientrt.sense.com/";
@@ -420,24 +420,25 @@ impl<T: HttpTransport> Client<T> {
     }
 }
 
-/// The realtime feed needs [`NativeTransport`] for now.
+/// The realtime feed needs a transport that also opens websockets.
 #[cfg(not(target_family = "wasm"))]
-impl Client<NativeTransport> {
+impl<T: HttpTransport + WebSocketTransport> Client<T> {
     /// Open the realtime websocket feed for a monitor.
     ///
     /// A 401 on the handshake renews the token and retries once. A 401 from
     /// the open feed ([`Error::Api`] with status 401) does not; call
     /// [`renew`](Self::renew) before reconnecting.
-    pub async fn realtime(&self, monitor_id: i64) -> Result<RealtimeFeed> {
+    pub async fn realtime(&self, monitor_id: i64) -> Result<RealtimeFeed<T>> {
         let url = format!(
             "{}monitors/{monitor_id}/realtimefeed",
             self.inner.realtime_url
         );
         let token = self.access_token()?;
-        match RealtimeFeed::connect(&url, &token).await {
+        let transport = &self.inner.transport;
+        match RealtimeFeed::connect(transport, &url, &token).await {
             Err(Error::Api { status: 401, .. }) => {
                 self.renew_after_401(&token).await?;
-                RealtimeFeed::connect(&url, &self.access_token()?).await
+                RealtimeFeed::connect(transport, &url, &self.access_token()?).await
             }
             other => other,
         }
@@ -482,6 +483,7 @@ pub(crate) fn api_error(status: StatusCode, body: &[u8]) -> Error {
 mod tests {
     use super::*;
     use crate::client::PROTOCOL_VERSION;
+    use crate::transport::NativeTransport;
 
     #[test]
     fn mfa_error_is_detected() {
