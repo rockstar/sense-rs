@@ -42,6 +42,14 @@ async fn main() -> sense::Result<()> {
                 eprintln!("{e}");
                 continue;
             }
+            // An expired token can arrive here instead of failing the handshake.
+            // Renew and save it so the next run starts with a working session.
+            Err(e @ Error::Api { status: 401, .. }) => {
+                client.renew().await?;
+                save_if_changed(&client, &mut saved, &path);
+                eprintln!("session renewed; run again");
+                return Err(e);
+            }
             Err(e) => return Err(e),
         };
         match event.message {
@@ -77,7 +85,24 @@ fn save_if_changed(client: &Client<NativeTransport>, saved: &mut Option<Session>
     let current = client.session();
     if current != *saved {
         let json = serde_json::to_vec(&current).expect("a session always serializes");
-        std::fs::write(path, json).expect("write session file");
+        write_private(path, &json).expect("write session file");
         *saved = current;
     }
+}
+
+/// The session holds a refresh token, so keep the file readable by its owner only.
+fn write_private(path: &str, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    // Set on the handle before writing, so a file left 0644 by an older run is fixed too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents)
 }
